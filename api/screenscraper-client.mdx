@@ -1,0 +1,179 @@
+---
+title: ScreenScraperClient
+description: Low-level HTTP client for the ScreenScraper API v2
+---
+
+## Overview
+
+`ScreenScraperClient` is a low-level HTTP client that communicates with the [ScreenScraper](https://www.screenscraper.fr/) API to fetch game metadata and artwork. It handles authentication, request construction, response parsing, and region/language selection.
+
+<Note>
+  This is an internal API used by [ArtworkService](/api/artwork-service). Most applications should use ArtworkService instead of calling ScreenScraperClient directly.
+</Note>
+
+## Constructor
+
+```typescript
+constructor(credentials: ScreenScraperCredentials)
+```
+
+<ParamField path="credentials" type="ScreenScraperCredentials" required>
+  ScreenScraper API credentials object containing:
+  - `devId` - Developer ID
+  - `devPassword` - Developer password
+  - `userId` - User account ID (optional)
+  - `userPassword` - User account password (optional)
+</ParamField>
+
+## Methods
+
+### validateCredentials()
+
+Validates that the configured credentials are accepted by ScreenScraper using the `ssuserInfos` endpoint.
+
+```typescript
+async validateCredentials(): Promise<void>
+```
+
+**Throws:**
+- `ScreenScraperError` with code `'auth-failed'` if credentials are invalid
+- `ScreenScraperError` with code `'config-error'` if developer credentials are missing
+
+**Example:**
+
+```typescript
+const client = new ScreenScraperClient({
+  devId: process.env.SCREENSCRAPER_DEV_ID!,
+  devPassword: process.env.SCREENSCRAPER_DEV_PASSWORD!,
+  userId: '',
+  userPassword: ''
+});
+
+try {
+  await client.validateCredentials();
+  console.log('Credentials valid');
+} catch (error) {
+  console.error('Invalid credentials:', error);
+}
+```
+
+### fetchByHash()
+
+Looks up a game by ROM content hash (MD5).
+
+```typescript
+async fetchByHash(
+  md5: string,
+  systemId: string
+): Promise<ScreenScraperGameInfo | null>
+```
+
+<ParamField path="md5" type="string" required>
+  MD5 hash of the ROM file (case-insensitive)
+</ParamField>
+
+<ParamField path="systemId" type="string" required>
+  GameLord system ID (e.g., 'nes', 'snes', 'genesis'). Automatically mapped to ScreenScraper system IDs.
+</ParamField>
+
+**Returns:**
+- `ScreenScraperGameInfo` object if a match is found
+- `null` if no match is found (404 response)
+
+**Throws:**
+- `ScreenScraperError` with appropriate error code on failure
+
+**Example:**
+
+```typescript
+const gameInfo = await client.fetchByHash(
+  'a1b2c3d4e5f6...',
+  'nes'
+);
+
+if (gameInfo) {
+  console.log('Found:', gameInfo.title);
+  console.log('Cover art:', gameInfo.coverUrl);
+}
+```
+
+## Error handling
+
+ScreenScraperClient throws `ScreenScraperError` instances with structured error codes:
+
+| Error Code | Description |
+|------------|-------------|
+| `timeout` | Request exceeded 15 second timeout |
+| `auth-failed` | Invalid credentials |
+| `config-error` | Missing developer credentials in configuration |
+| `rate-limited` | Too many requests (429 response) |
+| `network-error` | Network connectivity issue |
+| `parse-error` | Invalid JSON response from API |
+
+**Example:**
+
+```typescript
+try {
+  const game = await client.fetchByHash(md5, systemId);
+} catch (error) {
+  if (error instanceof ScreenScraperError) {
+    switch (error.code) {
+      case 'rate-limited':
+        console.log('Rate limited, retry later');
+        break;
+      case 'auth-failed':
+        console.log('Check your credentials');
+        break;
+      default:
+        console.error('Lookup failed:', error.message);
+    }
+  }
+}
+```
+
+## Region and language selection
+
+ScreenScraperClient automatically selects the best region/language variant for localized content:
+
+**Region priority:**
+1. US (`us`)
+2. World (`wor`)
+3. Europe (`eu`)
+4. ScreenScraper (`ss`)
+5. Japan (`jp`)
+
+**Language priority:**
+1. English (`en`)
+2. French (`fr`)
+3. Spanish (`es`)
+4. German (`de`)
+5. Portuguese (`pt`)
+6. Italian (`it`)
+
+This ensures users receive English metadata and North American cover art when available.
+
+## Configuration
+
+Developer credentials must be configured via environment variables:
+
+```bash
+SCREENSCRAPER_DEV_ID=your-developer-id
+SCREENSCRAPER_DEV_PASSWORD=your-developer-password
+```
+
+<Warning>
+  Developer credentials are required. Register for a ScreenScraper developer account at [screenscraper.fr](https://www.screenscraper.fr/).
+</Warning>
+
+## Rate limiting
+
+ScreenScraper enforces rate limits. ArtworkService automatically handles rate limiting by spacing requests 1.1 seconds apart. If you use ScreenScraperClient directly, implement your own rate limiting.
+
+## Source reference
+
+- Source: `apps/desktop/src/main/services/ScreenScraperClient.ts`
+
+## Related APIs
+
+- [ArtworkService](/api/artwork-service) - High-level service for artwork syncing
+- [LibraryService](/api/library-service) - Game library management

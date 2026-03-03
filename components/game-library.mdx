@@ -1,0 +1,229 @@
+---
+title: GameLibrary
+description: Full-featured game library grid with search, filters, sorting, and virtualization
+---
+
+## Overview
+
+`GameLibrary` is a comprehensive component that renders a virtualized grid of game cards with built-in search, filtering, sorting, and view modes. It's the primary UI for browsing and managing your game collection.
+
+<Note>
+  For libraries larger than 100 games, GameLibrary automatically enables virtualized rendering to maintain 60fps scrolling performance.
+</Note>
+
+## Props
+
+<ParamField path="games" type="Game[]" required>
+  Array of games to display in the library
+</ParamField>
+
+<ParamField path="onPlayGame" type="(game: Game, cardRect?: DOMRect) => void" required>
+  Callback invoked when a user clicks a game card to launch it. Receives the game object and the card's DOM rect for hero transition animations.
+</ParamField>
+
+<ParamField path="onGameOptions" type="(game: Game) => void">
+  Callback invoked when the user opens the game options menu
+</ParamField>
+
+<ParamField path="getMenuItems" type="(game: Game) => GameCardMenuItem[]">
+  Function that returns menu items for a specific game's dropdown menu. Called dynamically for each card.
+</ParamField>
+
+<ParamField path="onToggleFavorite" type="(game: Game) => void">
+  Callback invoked when the user toggles the favorite heart icon on a card
+</ParamField>
+
+<ParamField path="artworkSyncStore" type="ArtworkSyncStore">
+  External store for per-game artwork sync phases. Each card subscribes to its own phase to show download progress.
+</ParamField>
+
+<ParamField path="launchingGameId" type="string | null">
+  ID of the game currently being launched. Shows shimmer effect on that card and disables other cards.
+</ParamField>
+
+<ParamField path="scrollContainerRef" type="React.RefObject<HTMLElement | null>">
+  Ref to the scrollable container element. Required for virtualization to work correctly.
+</ParamField>
+
+<ParamField path="className" type="string">
+  Additional CSS classes to apply to the root element
+</ParamField>
+
+## Features
+
+### Search and filtering
+
+GameLibrary includes built-in search and platform filtering:
+
+- **Search** - Filters games by title (case-insensitive)
+- **Platform filter** - Shows games for a specific system or all platforms
+- **Favorites toggle** - Filters to show only favorited games
+
+### View modes
+
+Two display modes are available:
+
+- **Grid view** - Mosaic layout with cover art (default)
+- **List view** - Compact list with metadata columns
+
+### Sorting options
+
+Games can be sorted by:
+
+- **Title** - Alphabetical order
+- **Platform** - Grouped by system
+- **Last played** - Most recently played first
+- **Recent** - Recently added to library
+
+### Virtualization
+
+For libraries with more than 100 games, GameLibrary automatically enables virtualized rendering:
+
+- Only visible cards are rendered in the DOM
+- Reduces DOM nodes from 1200+ to ~40 for large libraries
+- Maintains smooth 60fps scrolling performance
+- Uses `useMosaicVirtualizer` hook under the hood
+
+### Flip animations
+
+GameLibrary uses FLIP (First, Last, Invert, Play) animations when games are filtered or re-sorted, creating smooth position transitions.
+
+## Usage
+
+### Basic example
+
+```tsx
+import { GameLibrary } from '@gamelord/ui';
+
+function Library() {
+  const games = [
+    { id: '1', title: 'Super Mario Bros.', systemId: 'nes', /* ... */ },
+    { id: '2', title: 'Sonic the Hedgehog', systemId: 'genesis', /* ... */ }
+  ];
+
+  const handlePlayGame = (game: Game, cardRect?: DOMRect) => {
+    console.log('Launching game:', game.title);
+    // Launch game with hero transition from cardRect
+  };
+
+  return (
+    <GameLibrary
+      games={games}
+      onPlayGame={handlePlayGame}
+    />
+  );
+}
+```
+
+### With menu items and favorites
+
+```tsx
+import { GameLibrary, GameCardMenuItem } from '@gamelord/ui';
+
+function LibraryWithActions() {
+  const getMenuItems = (game: Game): GameCardMenuItem[] => [
+    {
+      label: 'View Details',
+      icon: 'info',
+      onClick: () => console.log('Details for', game.title)
+    },
+    {
+      label: 'Delete',
+      icon: 'trash',
+      variant: 'danger',
+      onClick: () => confirmDelete(game)
+    }
+  ];
+
+  const handleToggleFavorite = (game: Game) => {
+    // Update game.isFavorite in your state
+  };
+
+  return (
+    <GameLibrary
+      games={games}
+      onPlayGame={handlePlayGame}
+      getMenuItems={getMenuItems}
+      onToggleFavorite={handleToggleFavorite}
+    />
+  );
+}
+```
+
+### With artwork sync progress
+
+```tsx
+import { GameLibrary, ArtworkSyncStore } from '@gamelord/ui';
+
+function LibraryWithSync() {
+  const artworkSyncStore = new ArtworkSyncStore();
+
+  // Update sync phases as artwork downloads
+  useEffect(() => {
+    artworkSyncStore.setPhase('game-123', 'downloading');
+    // ... later:
+    artworkSyncStore.setPhase('game-123', 'done');
+  }, []);
+
+  return (
+    <GameLibrary
+      games={games}
+      onPlayGame={handlePlayGame}
+      artworkSyncStore={artworkSyncStore}
+    />
+  );
+}
+```
+
+### With virtualization
+
+```tsx
+import { GameLibrary } from '@gamelord/ui';
+import { useRef } from 'react';
+
+function LargeLibrary() {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div
+      ref={scrollContainerRef}
+      style={{ height: '100vh', overflow: 'auto' }}
+    >
+      <GameLibrary
+        games={largeGameCollection} // 500+ games
+        onPlayGame={handlePlayGame}
+        scrollContainerRef={scrollContainerRef}
+      />
+    </div>
+  );
+}
+```
+
+<Tip>
+  Always provide a `scrollContainerRef` when using GameLibrary inside a fixed-height scrollable container. This enables virtualization to work correctly.
+</Tip>
+
+## Performance optimizations
+
+GameLibrary includes several performance optimizations:
+
+1. **Virtualized rendering** - Only visible cards are in the DOM (>100 games)
+2. **FLIP animations** - Smooth transitions without layout thrashing
+3. **Memoized filtering** - Search and filter operations are cached
+4. **ResizeObserver** - Efficient container width tracking for responsive layout
+5. **Debounced search** - Search input is debounced to reduce re-renders
+
+## Keyboard navigation
+
+GameLibrary supports keyboard navigation:
+
+- **Arrow keys** - Navigate between cards
+- **Enter** - Launch selected game
+- **/** - Focus search input
+- **Esc** - Clear search
+
+## Related components
+
+- [GameCard](/components/game-card) - Individual game card component
+- [ScrollLetterIndicator](/components/overview) - Alphabet scroll indicator for quick navigation
+- [GameWindow](/components/game-window) - Component for playing games

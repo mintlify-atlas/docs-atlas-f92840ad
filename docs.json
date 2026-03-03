@@ -63,6 +63,7 @@
               "components/overview",
               "components/game-card",
               "components/game-details",
+              "components/game-library",
               "components/library-view",
               "components/game-window"
             ]
@@ -85,6 +86,7 @@
               "api/emulator-manager",
               "api/library-service",
               "api/artwork-service",
+              "api/screenscraper-client",
               "api/game-window-manager"
             ]
           },
