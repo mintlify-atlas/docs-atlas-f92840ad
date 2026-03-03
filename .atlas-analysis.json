@@ -1,0 +1,122 @@
+{
+  "projectType": "frontend",
+  "projectName": "GameLord",
+  "projectDescription": "A modern, elegant emulation frontend with superior UI/UX polish built on Electron, React, and libretro cores.",
+  "theme": "almond",
+  "primaryColor": "#8b5cf6",
+  "lightColor": "#a78bfa",
+  "darkColor": "#7c3aed",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "User Guide",
+            "pages": [
+              "user-guide/library-management",
+              "user-guide/playing-games",
+              "user-guide/save-states",
+              "user-guide/visual-effects",
+              "user-guide/supported-systems"
+            ]
+          },
+          {
+            "group": "Developer Guide",
+            "pages": [
+              "developer/architecture",
+              "developer/building",
+              "developer/configuration",
+              "developer/libretro-cores",
+              "developer/testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Components",
+        "groups": [
+          {
+            "group": "UI Components",
+            "pages": [
+              "components/overview",
+              "components/game-card",
+              "components/game-details",
+              "components/library-view",
+              "components/game-window"
+            ]
+          },
+          {
+            "group": "Animations",
+            "pages": [
+              "components/animations/power-animation",
+              "components/animations/crt-animation"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core APIs",
+            "pages": [
+              "api/emulator-manager",
+              "api/library-service",
+              "api/artwork-service",
+              "api/game-window-manager"
+            ]
+          },
+          {
+            "group": "Emulator",
+            "pages": [
+              "api/emulator/libretro-core",
+              "api/emulator/worker-client",
+              "api/emulator/core-downloader"
+            ]
+          },
+          {
+            "group": "Hooks",
+            "pages": [
+              "api/hooks/use-gamepad",
+              "api/hooks/use-webgl-renderer"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-system emulation powered by libretro cores",
+    "Beautiful native UI built with shadcn/ui",
+    "High-performance WebGL rendering with shader effects",
+    "Automatic ROM scanning and metadata fetching",
+    "Save state management with multiple slots",
+    "CRT shaders and visual enhancements",
+    "Gamepad support with customizable mappings",
+    "Library management with artwork and metadata"
+  ],
+  "publicApiSurface": [
+    "EmulatorManager.startGame()",
+    "LibraryService.scanDirectory()",
+    "LibraryService.addGame()",
+    "ArtworkService.syncGameArtwork()",
+    "GameWindowManager.openGame()",
+    "LibretroNativeCore.loadGame()",
+    "EmulationWorkerClient.start()",
+    "useGamepad() hook",
+    "useWebGLRenderer() hook",
+    "GameCard component",
+    "GameDetails component",
+    "LibraryView component",
+    "GameWindow component"
+  ]
+}
