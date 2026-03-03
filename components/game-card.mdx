@@ -1,0 +1,250 @@
+---
+title: GameCard
+description: Display game cover art with hover effects and artwork sync states
+---
+
+The `GameCard` component displays a game's cover art with hover effects, favorite toggles, and real-time artwork sync feedback.
+
+## Import
+
+```typescript
+import { GameCard, type Game, type GameCardProps } from '@gamelord/ui'
+```
+
+## Basic usage
+
+```tsx
+import { GameCard } from '@gamelord/ui'
+
+function MyLibrary() {
+  const game = {
+    id: '1',
+    title: 'Super Mario Bros.',
+    platform: 'NES',
+    systemId: 'nes',
+    genre: 'Platform',
+    coverArt: '/artwork/super-mario-bros.png',
+    romPath: '/roms/smb.nes',
+  }
+
+  return (
+    <GameCard
+      game={game}
+      onPlay={(game) => console.log('Playing:', game.title)}
+    />
+  )
+}
+```
+
+## Props
+
+<ParamField path="game" type="Game" required>
+  Game object to display. See the Game interface below for details.
+</ParamField>
+
+<ParamField path="onPlay" type="(game: Game, cardRect?: DOMRect) => void" required>
+  Called when the user clicks the card to play the game. Receives the game object and optional card bounding rect for animations.
+</ParamField>
+
+<ParamField path="onOptions" type="(game: Game) => void">
+  **Deprecated:** Use `menuItems` instead. Called when the user clicks the options button.
+</ParamField>
+
+<ParamField path="menuItems" type="GameCardMenuItem[]">
+  Menu items shown in the options dropdown on hover.
+
+  ```typescript
+  interface GameCardMenuItem {
+    label: string
+    icon?: React.ReactNode
+    onClick: () => void
+  }
+  ```
+</ParamField>
+
+<ParamField path="getMenuItems" type="(game: Game) => GameCardMenuItem[]">
+  Factory function that returns menu items. Called lazily when dropdown opens. Preferred over `menuItems` for memoization.
+</ParamField>
+
+<ParamField path="onToggleFavorite" type="(game: Game) => void">
+  Called when the user toggles the favorite heart on this card.
+</ParamField>
+
+<ParamField path="artworkSyncStore" type="ArtworkSyncStore">
+  External store for artwork sync phases. The card subscribes to its own game's phase.
+</ParamField>
+
+<ParamField path="isLaunching" type="boolean">
+  Whether this game is currently being launched. Shows a shimmer overlay and wait cursor.
+</ParamField>
+
+<ParamField path="disabled" type="boolean">
+  Whether this card is disabled (e.g., another game is launching). Dims the card and prevents interaction.
+</ParamField>
+
+<ParamField path="className" type="string">
+  Additional CSS classes to apply to the card.
+</ParamField>
+
+<ParamField path="style" type="React.CSSProperties">
+  Inline styles forwarded to the root card element (useful for animation delays).
+</ParamField>
+
+<ParamField path="ref" type="React.Ref<HTMLDivElement>">
+  Ref forwarded to the root Card element (used for FLIP measurements).
+</ParamField>
+
+## Game interface
+
+```typescript packages/ui/components/GameCard.tsx
+export interface Game {
+  id: string
+  title: string
+  platform: string
+  /** Machine-readable system identifier (e.g. "snes", "nes"). Used for launch. */
+  systemId?: string
+  genre?: string
+  coverArt?: string
+  /** Width/height ratio of cover art (e.g. 0.714). Used for dynamic card sizing. */
+  coverArtAspectRatio?: number
+  romPath: string
+  lastPlayed?: Date
+  playTime?: number
+  favorite?: boolean
+}
+```
+
+## Examples
+
+### With favorite toggle
+
+```tsx
+const [games, setGames] = useState(initialGames)
+
+const handleToggleFavorite = (game: Game) => {
+  setGames(prev => prev.map(g =>
+    g.id === game.id ? { ...g, favorite: !g.favorite } : g
+  ))
+}
+
+<GameCard
+  game={game}
+  onPlay={handlePlay}
+  onToggleFavorite={handleToggleFavorite}
+/>
+```
+
+### With menu items
+
+```tsx
+import { ImageDown, X } from 'lucide-react'
+
+const menuItems = [
+  {
+    label: 'Download Artwork',
+    icon: <ImageDown className="h-4 w-4 mr-2" />,
+    onClick: () => downloadArtwork(game.id)
+  },
+  {
+    label: 'Remove from Library',
+    icon: <X className="h-4 w-4 mr-2" />,
+    onClick: () => removeGame(game.id)
+  }
+]
+
+<GameCard
+  game={game}
+  onPlay={handlePlay}
+  menuItems={menuItems}
+/>
+```
+
+### With lazy menu items (recommended)
+
+```tsx
+const getMenuItems = useCallback((game: Game) => [
+  {
+    label: 'Download Artwork',
+    onClick: () => syncArtwork(game.id)
+  },
+  {
+    label: 'Remove from Library',
+    onClick: () => removeGame(game.id)
+  }
+], [])
+
+<GameCard
+  game={game}
+  onPlay={handlePlay}
+  getMenuItems={getMenuItems}
+/>
+```
+
+### With artwork sync
+
+```tsx
+import { ArtworkSyncStore } from '@gamelord/ui'
+
+const artworkSyncStore = new ArtworkSyncStore()
+
+// Set sync phase from IPC events
+api.on('artwork:progress', (progress) => {
+  artworkSyncStore.setPhase(progress.gameId, progress.phase)
+})
+
+<GameCard
+  game={game}
+  onPlay={handlePlay}
+  artworkSyncStore={artworkSyncStore}
+/>
+```
+
+## Artwork sync phases
+
+The card displays different states during artwork sync:
+
+- `hashing` - TV static with pulsing animation
+- `querying` - TV static while querying ScreenScraper
+- `downloading` - TV static while downloading image
+- `done` - Cross-fade from static to cover art
+- `error` - Brief red flash then return to fallback
+- `not-found` - Static with "Artwork not found" label
+
+<Note>
+  The `done` phase auto-clears after 1.5s. The `error` phase auto-clears after 2.5s. The `not-found` phase persists so users know not to retry.
+</Note>
+
+## Visual states
+
+### Hover effects
+
+- Card scales to 105% with shadow
+- Favorite heart appears (if `onToggleFavorite` provided)
+- Options button appears (if `menuItems` or `onOptions` provided)
+
+### Launch state
+
+- Shimmer overlay animation
+- Scale to 105% and elevated shadow
+- Wait cursor
+
+### Disabled state
+
+- Opacity reduced to 50%
+- Pointer events disabled
+- No hover effects
+
+## Accessibility
+
+- Card is keyboard focusable with `tabIndex={0}`
+- Supports Enter and Space keys to play
+- ARIA label: `"Play {game.title}"`
+- Favorite button has descriptive ARIA label
+- Options button has descriptive ARIA label
+
+## Performance notes
+
+- Uses `React.memo` with custom comparator to skip re-renders
+- Menu items are generated lazily when dropdown opens
+- Artwork sync uses external store with `useSyncExternalStore` to bypass React
+- Cover art image always in DOM to prevent mount/unmount flicker

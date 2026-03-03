@@ -1,0 +1,543 @@
+---
+title: EmulatorManager
+description: Manages emulator instances and provides a unified interface for launching games
+---
+
+The `EmulatorManager` class handles emulator discovery, selection, and lifecycle management. It supports both RetroArch (external process) and native libretro core loading modes.
+
+## Constructor
+
+```typescript
+const emulatorManager = new EmulatorManager();
+```
+
+Automatically discovers available emulators on the system and initializes the core downloader.
+
+## Core management
+
+### getCoreDownloader()
+
+Returns the `CoreDownloader` instance for managing libretro cores.
+
+```typescript
+const coreDownloader = emulatorManager.getCoreDownloader();
+```
+
+**Returns:** `CoreDownloader`
+
+### getCoresForSystem()
+
+Returns information about all known cores for a system, including display name, description, and installation status.
+
+```typescript
+const cores = emulatorManager.getCoresForSystem('nes');
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier (e.g., `'nes'`, `'snes'`, `'genesis'`)
+</ParamField>
+
+**Returns:** `CoreInfo[]`
+
+**Example response:**
+```typescript
+[
+  {
+    name: 'fceumm_libretro',
+    displayName: 'FCEUmm',
+    description: 'Fast NES emulator',
+    installed: true,
+    path: '/path/to/fceumm_libretro.dylib'
+  }
+]
+```
+
+### getCorePathForSystem()
+
+Get the core path for a specific system, checking the app-managed cores directory first, then falling back to RetroArch's directory.
+
+```typescript
+const corePath = emulatorManager.getCorePathForSystem('nes');
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier
+</ParamField>
+
+**Returns:** `string | null` - Core file path, or null if no core is installed
+
+## Emulator management
+
+### getAvailableEmulators()
+
+Get list of available emulators discovered on the system.
+
+```typescript
+const emulators = emulatorManager.getAvailableEmulators();
+```
+
+**Returns:** `EmulatorInfo[]`
+
+<ResponseField name="EmulatorInfo" type="object">
+  <ResponseField name="id" type="string">
+    Unique emulator identifier
+  </ResponseField>
+  <ResponseField name="name" type="string">
+    Display name
+  </ResponseField>
+  <ResponseField name="type" type="string">
+    Emulator type: `'retroarch'` or `'libretro-native'`
+  </ResponseField>
+  <ResponseField name="path" type="string">
+    Installation path
+  </ResponseField>
+  <ResponseField name="supportedSystems" type="string[]">
+    Array of system IDs this emulator supports
+  </ResponseField>
+  <ResponseField name="features" type="object">
+    Feature support flags (saveStates, screenshots, pauseResume, etc.)
+  </ResponseField>
+</ResponseField>
+
+### getEmulator()
+
+Get a specific emulator by ID.
+
+```typescript
+const emulator = emulatorManager.getEmulator('libretro-native');
+```
+
+<ParamField path="emulatorId" type="string" required>
+  Emulator identifier
+</ParamField>
+
+**Returns:** `EmulatorInfo | undefined`
+
+### isEmulatorRunning()
+
+Check if an emulator is currently running.
+
+```typescript
+if (emulatorManager.isEmulatorRunning()) {
+  console.log('Game is running');
+}
+```
+
+**Returns:** `boolean`
+
+### getCurrentEmulatorPid()
+
+Get the currently running emulator's process ID (for external RetroArch processes).
+
+```typescript
+const pid = emulatorManager.getCurrentEmulatorPid();
+```
+
+**Returns:** `number | undefined`
+
+### isNativeMode()
+
+Check if the current emulator is using native libretro core loading.
+
+```typescript
+if (emulatorManager.isNativeMode()) {
+  // Single window mode - game renders inside BrowserWindow
+}
+```
+
+**Returns:** `boolean`
+
+## Game launching
+
+### launchGame()
+
+Launch a game with the specified emulator and system. Automatically downloads missing cores.
+
+```typescript
+await emulatorManager.launchGame(
+  '/path/to/game.nes',
+  'nes',
+  'libretro-native',
+  undefined,
+  'fceumm_libretro'
+);
+```
+
+<ParamField path="romPath" type="string" required>
+  Full path to the ROM file
+</ParamField>
+
+<ParamField path="systemId" type="string" required>
+  System identifier (e.g., `'nes'`, `'snes'`)
+</ParamField>
+
+<ParamField path="emulatorId" type="string">
+  Emulator ID to use. If omitted, selects the best available emulator for the system.
+</ParamField>
+
+<ParamField path="extraArgs" type="string[]">
+  Additional command-line arguments for external emulators
+</ParamField>
+
+<ParamField path="coreName" type="string">
+  Specific core to use (e.g., `'fceumm_libretro'`). If omitted, uses the preferred core for the system.
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+**Throws:** Error if no emulator is found for the system or core download fails
+
+**Emits:**
+- `gameLaunched` - When game starts successfully
+- `core:downloadProgress` - During core download (if needed)
+
+<Note>
+If the requested core is not installed, `launchGame` will automatically download it before launching.
+</Note>
+
+### stopEmulator()
+
+Stop the currently running emulator.
+
+```typescript
+await emulatorManager.stopEmulator();
+```
+
+**Returns:** `Promise<void>`
+
+## Emulation control
+
+### pause()
+
+Pause the current emulator.
+
+```typescript
+await emulatorManager.pause();
+```
+
+**Returns:** `Promise<void>`
+
+**Throws:** Error if no emulator is running
+
+**Emits:** `emulator:paused`
+
+### resume()
+
+Resume the current emulator.
+
+```typescript
+await emulatorManager.resume();
+```
+
+**Returns:** `Promise<void>`
+
+**Throws:** Error if no emulator is running
+
+**Emits:** `emulator:resumed`
+
+### reset()
+
+Reset the current emulator (soft reset the game).
+
+```typescript
+await emulatorManager.reset();
+```
+
+**Returns:** `Promise<void>`
+
+**Throws:** Error if no emulator is running
+
+**Emits:** `emulator:reset`
+
+### setSpeed()
+
+Set emulation speed multiplier.
+
+```typescript
+// Fast-forward at 2x speed
+emulatorManager.setSpeed(2);
+
+// Reset to normal speed
+emulatorManager.setSpeed(1);
+```
+
+<ParamField path="multiplier" type="number" required>
+  Speed multiplier (1 = normal, 2 = 2x, 0.5 = half speed)
+</ParamField>
+
+**Returns:** `void`
+
+<Note>
+Speed control only works in native mode (libretro-native). External RetroArch processes do not support this API.
+</Note>
+
+## Save states
+
+### saveState()
+
+Save state to a specific slot.
+
+```typescript
+// Save to slot 0
+await emulatorManager.saveState(0);
+
+// Slot 99 is reserved for autosave
+await emulatorManager.saveState(99);
+```
+
+<ParamField path="slot" type="number" required>
+  Save slot number (0-99). Slot 99 is used for autosave on game close.
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+**Throws:** Error if no emulator is running or save fails
+
+**Emits:** `emulator:stateSaved` with `{ slot: number }`
+
+### loadState()
+
+Load state from a specific slot.
+
+```typescript
+// Load from slot 0
+await emulatorManager.loadState(0);
+
+// Load autosave
+await emulatorManager.loadState(99);
+```
+
+<ParamField path="slot" type="number" required>
+  Save slot number to load from
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+**Throws:** Error if no emulator is running or load fails
+
+**Emits:** `emulator:stateLoaded` with `{ slot: number }`
+
+## Screenshots
+
+### screenshot()
+
+Take a screenshot of the current game.
+
+```typescript
+// Auto-generate filename
+const path = await emulatorManager.screenshot();
+
+// Custom output path
+const path = await emulatorManager.screenshot('/path/to/screenshot.png');
+```
+
+<ParamField path="outputPath" type="string">
+  Optional output file path. If omitted, generates a timestamped filename in the screenshots directory.
+</ParamField>
+
+**Returns:** `Promise<string>` - Path to the saved screenshot
+
+**Throws:** Error if no emulator is running or screenshot fails
+
+**Emits:** `emulator:screenshotTaken` with `{ path: string }`
+
+## Worker client (native mode)
+
+### setWorkerClient()
+
+Set the worker client for native mode emulation. Called internally by IPCHandlers after spawning the utility process.
+
+```typescript
+emulatorManager.setWorkerClient(workerClient);
+```
+
+<ParamField path="client" type="EmulationWorkerClient | null" required>
+  Worker client instance, or null to clear
+</ParamField>
+
+**Returns:** `void`
+
+### getWorkerClient()
+
+Get the current worker client (if in native mode).
+
+```typescript
+const workerClient = emulatorManager.getWorkerClient();
+if (workerClient) {
+  console.log('Running in native mode');
+}
+```
+
+**Returns:** `EmulationWorkerClient | null`
+
+### getCurrentEmulator()
+
+Get the current emulator instance (for native core access).
+
+```typescript
+const emulator = emulatorManager.getCurrentEmulator();
+```
+
+**Returns:** `EmulatorCore | null`
+
+### prepareForQuit()
+
+Synchronously mark the worker as shutting down so that a process exit during the async shutdown sequence doesn't emit an error.
+
+```typescript
+emulatorManager.prepareForQuit();
+```
+
+**Returns:** `void`
+
+<Warning>
+This must be called before the app quits to prevent error events during worker shutdown.
+</Warning>
+
+## Events
+
+EmulatorManager extends EventEmitter and emits the following events:
+
+<ResponseField name="gameLaunched" type="object">
+  Emitted when a game starts successfully
+  <ResponseField name="romPath" type="string">
+    Path to the ROM file
+  </ResponseField>
+  <ResponseField name="systemId" type="string">
+    System identifier
+  </ResponseField>
+  <ResponseField name="emulatorId" type="string">
+    Emulator used
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="emulator:launched" type="object">
+  Emulated by the underlying EmulatorCore
+</ResponseField>
+
+<ResponseField name="emulator:exited" type="object">
+  Emulator process exited
+  <ResponseField name="code" type="number">
+    Exit code
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="emulator:error" type="object">
+  Emulator error occurred
+  <ResponseField name="message" type="string">
+    Error message
+  </ResponseField>
+  <ResponseField name="fatal" type="boolean">
+    Whether the error is fatal
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="emulator:paused" type="void">
+  Emulation paused
+</ResponseField>
+
+<ResponseField name="emulator:resumed" type="void">
+  Emulation resumed
+</ResponseField>
+
+<ResponseField name="emulator:reset" type="void">
+  Emulation reset
+</ResponseField>
+
+<ResponseField name="emulator:speedChanged" type="object">
+  Emulation speed changed
+  <ResponseField name="multiplier" type="number">
+    New speed multiplier
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="emulator:stateSaved" type="object">
+  Save state created
+  <ResponseField name="slot" type="number">
+    Slot number
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="emulator:stateLoaded" type="object">
+  Save state loaded
+  <ResponseField name="slot" type="number">
+    Slot number
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="emulator:screenshotTaken" type="object">
+  Screenshot saved
+  <ResponseField name="path" type="string">
+    File path
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="emulator:terminated" type="void">
+  Emulator terminated
+</ResponseField>
+
+<ResponseField name="core:downloadProgress" type="object">
+  Core download progress
+  <ResponseField name="coreName" type="string">
+    Core being downloaded
+  </ResponseField>
+  <ResponseField name="progress" type="number">
+    Download progress (0-100)
+  </ResponseField>
+</ResponseField>
+
+## Usage example
+
+```typescript
+import { EmulatorManager } from './EmulatorManager';
+
+const emulatorManager = new EmulatorManager();
+
+// Listen for events
+emulatorManager.on('gameLaunched', (data) => {
+  console.log(`Game launched: ${data.romPath}`);
+});
+
+emulatorManager.on('emulator:error', (error) => {
+  console.error('Emulator error:', error.message);
+});
+
+// Launch a game with automatic core selection
+await emulatorManager.launchGame(
+  '/path/to/super-mario-bros.nes',
+  'nes'
+);
+
+// Pause the game
+await emulatorManager.pause();
+
+// Save state
+await emulatorManager.saveState(0);
+
+// Resume
+await emulatorManager.resume();
+
+// Stop when done
+await emulatorManager.stopEmulator();
+```
+
+## Error handling
+
+All async methods throw errors that should be caught:
+
+```typescript
+try {
+  await emulatorManager.launchGame(romPath, systemId);
+} catch (error) {
+  if (error.message.includes('No emulator found')) {
+    console.error('System not supported');
+  } else {
+    console.error('Launch failed:', error.message);
+  }
+}
+```
+
+## Source reference
+
+- Implementation: `apps/desktop/src/main/emulator/EmulatorManager.ts:16`
+- Usage example: `apps/desktop/src/main/ipc/handlers.ts:21`

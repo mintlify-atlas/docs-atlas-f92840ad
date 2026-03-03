@@ -1,0 +1,381 @@
+---
+title: CoreDownloader
+description: Download and manage libretro cores from the buildbot
+---
+
+The `CoreDownloader` class downloads libretro cores from the official buildbot on demand and stores them in the app-managed cores directory. It provides metadata about available cores, tracks installation status, and emits progress events during downloads.
+
+<Note>
+Currently only macOS ARM64 is supported. Windows and Linux support will be added in future releases.
+</Note>
+
+## Constructor
+
+```typescript
+const downloader = new CoreDownloader()
+```
+
+Creates a new core downloader. The cores directory is automatically created at `userData/cores`.
+
+## Methods
+
+### Directory management
+
+#### getCoresDirectory
+
+```typescript
+getCoresDirectory(): string
+```
+
+Returns the app-managed cores directory path, creating it if needed.
+
+#### Example
+
+```typescript
+const coresDir = downloader.getCoresDirectory()
+console.log('Cores directory:', coresDir)
+// Output: /Users/name/Library/Application Support/GameLord/cores
+```
+
+### Core information
+
+#### getPreferredCore
+
+```typescript
+getPreferredCore(systemId: string): string | null
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier (e.g., `'snes'`, `'genesis'`, `'gba'`)
+</ParamField>
+
+<ResponseField name="coreName" type="string | null">
+  The preferred core name for the system, or `null` if the system is unknown
+</ResponseField>
+
+Returns the preferred libretro core name for a given system. This is the default core that will be downloaded when calling `downloadCoreForSystem()`.
+
+#### Supported systems
+
+| System ID | Preferred Core | Display Name |
+|-----------|---------------|-------------|
+| `nes` | `fceumm_libretro` | FCEUmm |
+| `snes` | `snes9x_libretro` | Snes9x |
+| `genesis` | `genesis_plus_gx_libretro` | Genesis Plus GX |
+| `gb` | `gambatte_libretro` | Gambatte |
+| `gbc` | `gambatte_libretro` | Gambatte |
+| `gba` | `mgba_libretro` | mGBA |
+| `n64` | `mupen64plus_next_libretro` | Mupen64Plus |
+| `psx` | `pcsx_rearmed_libretro` | PCSX ReARMed |
+| `saturn` | `mednafen_saturn_libretro` | Beetle Saturn |
+| `psp` | `ppsspp_libretro` | PPSSPP |
+| `nds` | `desmume_libretro` | DeSmuME |
+| `arcade` | `mame_libretro` | MAME |
+
+#### Example
+
+```typescript
+const coreName = downloader.getPreferredCore('snes')
+console.log(coreName) // Output: 'snes9x_libretro'
+```
+
+#### getCoresForSystem
+
+```typescript
+getCoresForSystem(systemId: string): CoreInfo[]
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier (e.g., `'snes'`, `'psx'`)
+</ParamField>
+
+<ResponseField name="CoreInfo[]" type="array">
+  Array of core information objects
+  
+  <Expandable title="CoreInfo structure">
+    ```typescript
+    interface CoreInfo {
+      name: string            // Internal core name (e.g., 'snes9x_libretro')
+      displayName: string     // Human-readable name (e.g., 'Snes9x')
+      description: string     // Core description and notes
+      installed: boolean      // Whether the core is currently installed
+    }
+    ```
+  </Expandable>
+</ResponseField>
+
+Returns info about all known cores for a system, including display name, description, and installation status.
+
+#### Example
+
+```typescript
+const snesCore = downloader.getCoresForSystem('snes')
+
+snesCores.forEach(core => {
+  console.log(`${core.displayName}: ${core.installed ? 'Installed' : 'Not installed'}`)
+  console.log(`  ${core.description}`)
+})
+
+// Output:
+// Snes9x: Installed
+//   Fast, highly compatible. Best for most games.
+// bsnes: Not installed
+//   Cycle-accurate. Perfect accuracy, higher CPU usage.
+```
+
+### Installation status
+
+#### hasCoreForSystem
+
+```typescript
+hasCoreForSystem(systemId: string): string | null
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier
+</ParamField>
+
+<ResponseField name="corePath" type="string | null">
+  Absolute path to the installed core, or `null` if not installed
+</ResponseField>
+
+Check if the preferred core for a system is already installed.
+
+#### isCoreInstalled
+
+```typescript
+isCoreInstalled(coreName: string): boolean
+```
+
+<ParamField path="coreName" type="string" required>
+  Internal core name (e.g., `'snes9x_libretro'`)
+</ParamField>
+
+Returns `true` if the specified core is installed.
+
+#### getCorePath
+
+```typescript
+getCorePath(coreName: string): string | null
+```
+
+<ParamField path="coreName" type="string" required>
+  Internal core name
+</ParamField>
+
+<ResponseField name="corePath" type="string | null">
+  Absolute path to the core file, or `null` if not installed
+</ResponseField>
+
+Returns the path to a specific core if it's installed.
+
+#### Example
+
+```typescript
+if (downloader.isCoreInstalled('snes9x_libretro')) {
+  const path = downloader.getCorePath('snes9x_libretro')
+  console.log('Core is installed at:', path)
+} else {
+  console.log('Core not found, downloading...')
+  await downloader.downloadCore('snes9x_libretro', 'snes')
+}
+```
+
+### Downloading cores
+
+#### downloadCoreForSystem
+
+```typescript
+await downloadCoreForSystem(systemId: string): Promise<string>
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier (e.g., `'snes'`, `'gba'`)
+</ParamField>
+
+<ResponseField name="corePath" type="string">
+  Absolute path to the downloaded core file
+</ResponseField>
+
+Downloads the preferred core for the given system. Emits `progress` events during the download.
+
+<Warning>
+Throws an error if no core is available for the system, or if the download fails.
+</Warning>
+
+#### Example
+
+```typescript
+downloader.on('progress', (progress) => {
+  console.log(`${progress.phase}: ${progress.percent}%`)
+})
+
+try {
+  const corePath = await downloader.downloadCoreForSystem('snes')
+  console.log('Core downloaded:', corePath)
+} catch (error) {
+  console.error('Download failed:', error.message)
+}
+```
+
+#### downloadCore
+
+```typescript
+await downloadCore(
+  coreName: string,
+  systemId: string
+): Promise<string>
+```
+
+<ParamField path="coreName" type="string" required>
+  Internal core name (e.g., `'bsnes_libretro'`)
+</ParamField>
+
+<ParamField path="systemId" type="string" required>
+  System identifier (for progress events)
+</ParamField>
+
+<ResponseField name="corePath" type="string">
+  Absolute path to the downloaded core file
+</ResponseField>
+
+Downloads a specific core by name. Emits `progress` events during the download.
+
+<Note>
+If the core is already installed, this method returns the existing path immediately without downloading.
+</Note>
+
+#### Duplicate download prevention
+
+If a download is already in progress for a core, subsequent calls to `downloadCore()` will wait for the existing download to complete instead of starting a new one.
+
+#### Example
+
+```typescript
+// Download a specific core
+const corePath = await downloader.downloadCore('bsnes_libretro', 'snes')
+
+// Concurrent calls wait for the same download
+const [path1, path2] = await Promise.all([
+  downloader.downloadCore('snes9x_libretro', 'snes'),
+  downloader.downloadCore('snes9x_libretro', 'snes') // Waits for the first
+])
+```
+
+## Events
+
+Inherits from `EventEmitter` and emits the following events:
+
+### progress
+
+Emitted during core downloads with status updates.
+
+```typescript
+downloader.on('progress', (progress: CoreDownloadProgress) => {
+  // Handle progress update
+})
+```
+
+#### CoreDownloadProgress structure
+
+```typescript
+interface CoreDownloadProgress {
+  coreName: string        // Internal core name
+  systemId: string        // System identifier
+  phase: 'downloading' | 'extracting' | 'done' | 'error'
+  percent: number         // Progress percentage (0-100)
+  error?: string          // Error message (only present when phase is 'error')
+}
+```
+
+#### Example
+
+```typescript
+downloader.on('progress', (progress) => {
+  switch (progress.phase) {
+    case 'downloading':
+      updateProgressBar(progress.percent)
+      break
+    case 'extracting':
+      showMessage('Extracting core...')
+      break
+    case 'done':
+      showMessage('Download complete!')
+      break
+    case 'error':
+      showError(progress.error)
+      break
+  }
+})
+
+await downloader.downloadCoreForSystem('snes')
+```
+
+## Download phases
+
+1. **downloading** (0-85%) — Fetching the .zip file from the buildbot
+2. **extracting** (90%) — Unzipping the core file
+3. **done** (100%) — Download complete, core is ready to use
+4. **error** — Download or extraction failed
+
+<Note>
+The download phase progresses from 0-85% to reserve 85-100% for extraction and verification.
+</Note>
+
+## Buildbot URLs
+
+Cores are downloaded from the official libretro buildbot:
+
+```
+https://buildbot.libretro.com/nightly/{platform}/{arch}/latest/{coreName}.{ext}.zip
+```
+
+Currently supported platforms:
+- **macOS ARM64**: `apple/osx/arm64` → `.dylib`
+
+<Warning>
+Windows (.dll) and Linux (.so) support is planned but not yet implemented.
+</Warning>
+
+## Error handling
+
+Download errors are emitted as `progress` events with `phase: 'error'`. Common errors:
+
+- **Network errors** — Connection failed or timeout
+- **HTTP errors** — 404 (core not found), 500 (buildbot error)
+- **Extraction errors** — Corrupt .zip file or missing `unzip` binary
+- **Too many redirects** — More than 5 redirects (possible buildbot issue)
+
+#### Example
+
+```typescript
+try {
+  await downloader.downloadCore('invalid_core', 'unknown')
+} catch (error) {
+  console.error('Download failed:', error.message)
+  // Output: Download failed with status 404 for https://buildbot.libretro.com/...
+}
+```
+
+## Core descriptions
+
+Some cores include important notes about requirements or tradeoffs:
+
+### SNES cores
+
+- **Snes9x**: Fast, highly compatible. Best for most games.
+- **bsnes**: Cycle-accurate. Perfect accuracy, higher CPU usage.
+
+### Saturn cores
+
+- **Beetle Saturn**: Accurate Saturn emulation. **Requires BIOS files** (`sega_101.bin`, `mpr-17933.bin`).
+- **Yabause**: Saturn emulation with lower accuracy but lighter hardware requirements.
+
+<Warning>
+Some cores (like Beetle Saturn) require additional BIOS files that must be placed in the `userData/BIOS` directory. The app should prompt the user to provide these files before launching a game.
+</Warning>
+
+## Related
+
+- [LibretroNativeCore](/api/emulator/libretro-core) — Native core wrapper with path validation
+- [EmulationWorkerClient](/api/emulator/worker-client) — Worker process client for running emulation

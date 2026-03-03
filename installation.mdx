@@ -1,0 +1,297 @@
+---
+title: Installation
+description: Complete setup guide with prerequisites and configuration
+---
+
+## System requirements
+
+### Operating system
+
+<Note>
+  GameLord currently supports **macOS 11+** only. Windows and Linux support is planned for a future release.
+</Note>
+
+- macOS 11 Big Sur or later
+- Apple Silicon (M1/M2/M3) or Intel processor
+
+### Software dependencies
+
+- **Node.js 18+** - JavaScript runtime ([download](https://nodejs.org/))
+- **pnpm 10+** - Fast, disk space efficient package manager
+- **Git** - Version control (usually pre-installed on macOS)
+
+### Hardware recommendations
+
+- **RAM:** 8GB minimum, 16GB recommended
+- **GPU:** Integrated graphics sufficient for most systems; dedicated GPU recommended for intensive shaders
+- **Display:** Any resolution; high refresh rate displays (120Hz+) supported with vsync-aligned rendering
+
+## Installing dependencies
+
+### Install Node.js
+
+<CodeGroup>
+```bash Homebrew
+brew install node@18
+```
+
+```bash nvm
+# Install nvm first: https://github.com/nvm-sh/nvm
+nvm install 18
+nvm use 18
+```
+
+```bash Direct download
+# Download from https://nodejs.org/
+# Install the .pkg file
+```
+</CodeGroup>
+
+Verify the installation:
+
+```bash
+node --version  # Should output v18.x.x or higher
+```
+
+### Install pnpm
+
+<CodeGroup>
+```bash npm (recommended)
+npm install -g pnpm
+```
+
+```bash Homebrew
+brew install pnpm
+```
+
+```bash Standalone script
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+```
+</CodeGroup>
+
+Verify the installation:
+
+```bash
+pnpm --version  # Should output 10.x.x or higher
+```
+
+<Warning>
+  GameLord uses pnpm's workspace feature. Always use `pnpm` commands, never `npm` or `yarn`.
+</Warning>
+
+## Clone the repository
+
+```bash
+git clone https://github.com/yourusername/gamelord.git
+cd gamelord
+```
+
+## Install project dependencies
+
+```bash
+pnpm install
+```
+
+This installs all dependencies for the monorepo, including:
+- `apps/desktop` - The main Electron application
+- `packages/ui` - Shared UI components
+
+## Build the native addon
+
+GameLord uses a native Node.js addon to load libretro cores directly. This must be compiled for your system:
+
+```bash
+cd apps/desktop/native
+npx node-gyp rebuild
+cd ../../..
+```
+
+<Note>
+  The build process uses `node-gyp` to compile C++ code. On macOS, this requires Xcode Command Line Tools, which are usually installed automatically.
+</Note>
+
+### Troubleshooting native addon build
+
+If you encounter build errors:
+
+<AccordionGroup>
+  <Accordion title="Error: 'node-gyp' not compatible with Node.js 24+">
+    The bundled `node-gyp` in npm versions 5.x is too old for Node.js 24+.
+
+    **Solution:** Always use `npx node-gyp` instead of `npm run build` in the native directory:
+    ```bash
+    cd apps/desktop/native
+    npx node-gyp rebuild
+    ```
+  </Accordion>
+
+  <Accordion title="Error: 'Python not found'">
+    `node-gyp` requires Python 3.x.
+
+    **Solution:** Install Python:
+    ```bash
+    brew install python@3
+    ```
+  </Accordion>
+
+  <Accordion title="Error: 'Cannot find module gamelord_libretro.node'">
+    The native addon wasn't built or is in the wrong location.
+
+    **Solution:** Rebuild the addon:
+    ```bash
+    cd apps/desktop/native
+    npx node-gyp clean
+    npx node-gyp rebuild
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Configuration
+
+### Environment variables
+
+Create a `.env` file in `apps/desktop/`:
+
+```bash apps/desktop/.env
+# ScreenScraper API developer credentials
+# Register at https://www.screenscraper.fr/forumsujets.php?frub=12&numpage=0
+SCREENSCRAPER_DEV_ID=your-dev-id
+SCREENSCRAPER_DEV_PASSWORD=your-dev-password
+```
+
+<Warning>
+  Never commit your `.env` file to version control. It's already in `.gitignore`.
+</Warning>
+
+### Application directories
+
+GameLord stores data in standard macOS locations:
+
+| Type | Path |
+|------|------|
+| Library database | `~/Library/Application Support/GameLord/library.db` |
+| Libretro cores | `~/Library/Application Support/GameLord/cores/` |
+| BIOS files | `~/Library/Application Support/GameLord/BIOS/` |
+| Save states | `~/Library/Application Support/GameLord/saves/` |
+| Save RAM | `~/Library/Application Support/GameLord/saves/` |
+| Screenshots | `~/Library/Application Support/GameLord/screenshots/` |
+| Cover art cache | `~/Library/Application Support/GameLord/artwork/` |
+| Extracted ROMs | `~/Library/Application Support/GameLord/roms-cache/` |
+
+<Note>
+  These directories are created automatically on first launch.
+</Note>
+
+### BIOS files
+
+Some systems require BIOS files for emulation:
+
+- **Sega Saturn:** `sega_101.bin`, `mpr-17933.bin`
+- **PlayStation:** `scph5500.bin`, `scph5501.bin`, `scph5502.bin`
+- **Nintendo DS:** `bios7.bin`, `bios9.bin`, `firmware.bin`
+
+Place BIOS files in `~/Library/Application Support/GameLord/BIOS/`.
+
+<Warning>
+  BIOS files are copyrighted material. GameLord does not provide BIOS files. You must obtain them legally.
+</Warning>
+
+## Running GameLord
+
+### Development mode
+
+Start the app with hot reloading:
+
+```bash
+pnpm start
+```
+
+This runs the following commands in parallel:
+- `electron-vite dev` - Builds and watches main/renderer/preload processes
+- Launches Electron with the development build
+
+### Production build
+
+Build the app for distribution:
+
+```bash
+pnpm run build
+```
+
+This creates optimized builds in `apps/desktop/out/`.
+
+### Other useful commands
+
+```bash
+# Type checking
+pnpm typecheck
+
+# Linting
+pnpm lint
+
+# Run tests
+pnpm test
+
+# Build Storybook (UI component documentation)
+pnpm run build-storybook
+```
+
+## Project structure
+
+```
+gamelord/
+├── apps/
+│   └── desktop/              # Main Electron application
+│       ├── native/           # Native Node.js addon (C++)
+│       │   ├── src/
+│       │   │   ├── libretro_core.cc  # Core loading & API
+│       │   │   ├── libretro_core.h
+│       │   │   ├── libretro.h        # Libretro definitions
+│       │   │   └── addon.cc          # N-API registration
+│       │   └── binding.gyp           # Build configuration
+│       ├── src/
+│       │   ├── main/         # Main process
+│       │   │   ├── index.ts
+│       │   │   ├── GameWindowManager.ts
+│       │   │   ├── emulator/
+│       │   │   │   ├── EmulatorManager.ts
+│       │   │   │   ├── EmulationWorkerClient.ts
+│       │   │   │   └── LibretroNativeCore.ts
+│       │   │   ├── workers/
+│       │   │   │   └── core-worker.ts  # Utility process
+│       │   │   └── ipc/
+│       │   │       └── handlers.ts
+│       │   ├── renderer/     # Renderer process (React)
+│       │   │   ├── App.tsx
+│       │   │   ├── components/
+│       │   │   ├── hooks/
+│       │   │   └── stores/
+│       │   └── preload/      # Preload scripts
+│       └── electron.vite.config.ts
+├── packages/
+│   └── ui/                   # Shared UI components
+│       ├── src/
+│       │   ├── components/
+│       │   └── lib/
+│       └── tsconfig.json
+├── turbo.json                # Turborepo configuration
+├── package.json              # Root package.json
+└── pnpm-workspace.yaml       # pnpm workspace config
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get your first game running quickly
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/developer/architecture">
+    Learn about GameLord's technical design
+  </Card>
+  <Card title="Playing games" icon="gamepad" href="/user-guide/playing-games">
+    Learn how to play and manage games
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/library-service">
+    Explore the developer API
+  </Card>
+</CardGroup>

@@ -1,0 +1,448 @@
+---
+title: Supported systems
+description: Complete list of gaming systems supported by GameLord with core information
+---
+
+GameLord supports multiple gaming systems through libretro cores, with automatic core downloading and multi-system ROM detection.
+
+## System overview
+
+GameLord currently supports **11 gaming systems** spanning 8-bit to 128-bit generations, plus arcade:
+
+- Nintendo: NES, SNES, Game Boy/Color, Game Boy Advance, Nintendo 64, Nintendo DS
+- Sega: Genesis/Mega Drive, Saturn
+- Sony: PlayStation, PlayStation Portable
+- Arcade: MAME-compatible
+
+<Note>
+  All cores are downloaded automatically from the libretro buildbot when you first launch a game for a system.
+</Note>
+
+## Nintendo systems
+
+### Nintendo Entertainment System (NES)
+
+<ParamField path="System ID" type="string">
+  `nes`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  CRT (4:3 aspect ratio, NTSC/PAL)
+</ParamField>
+
+**File formats**: `.nes`, `.fds`, `.unf`, `.unif`
+
+**Available cores**:
+- **fceumm** (recommended) - Fast, accurate, broad compatibility
+- **nestopia** - High accuracy, cycle-perfect
+- **mesen** - Advanced features, debugging tools (note: currently has loading issues in native mode)
+
+**Special features**:
+- Famicom Disk System support (`.fds`)
+- NSF music playback
+- Zapper light gun support (future)
+
+---
+
+### Super Nintendo Entertainment System (SNES)
+
+<ParamField path="System ID" type="string">
+  `snes`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  CRT (4:3 aspect ratio, NTSC/PAL)
+</ParamField>
+
+**File formats**: `.sfc`, `.smc`, `.swc`, `.fig`
+
+**Available cores**:
+- **snes9x** (recommended) - Fast, highly compatible
+- **bsnes** - Cycle-accurate, highest compatibility
+- **bsnes-mercury** - Balanced accuracy and speed
+
+**Special features**:
+- Super FX chip support (Star Fox, Yoshi's Island)
+- SA-1 enhancement support
+- DSP coprocessor games
+
+---
+
+### Game Boy / Game Boy Color
+
+<ParamField path="System ID" type="string">
+  `gb`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  LCD (GB: monochrome green, GBC: color TFT)
+</ParamField>
+
+**File formats**: `.gb`, `.gbc`, `.sgb`
+
+**Available cores**:
+- **gambatte** (recommended) - Accurate, low overhead
+- **sameboy** - Excellent accuracy, debugging features
+- **mgba** - Also handles GBC (via unified core)
+
+**Special features**:
+- Super Game Boy border support (`.sgb`)
+- Game Boy Color enhancements
+- Link cable emulation (future)
+
+---
+
+### Game Boy Advance
+
+<ParamField path="System ID" type="string">
+  `gba`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  LCD (reflective TFT, 3:2 aspect ratio)
+</ParamField>
+
+**File formats**: `.gba`, `.agb`
+
+**Available cores**:
+- **mgba** (recommended) - Fast, accurate, active development
+- **vba-m** - Older, broader compatibility
+
+**Special features**:
+- GBA BIOS not required (HLE)
+- Native resolution: 240×160
+- Recommended shader: LCD GBA or LCD GBA + Motion Blur
+
+<Tip>
+  The LCD GBA shader applies the authentic GBA color correction matrix, fixing the washed-out colors that GBA games have without it.
+</Tip>
+
+---
+
+### Nintendo 64
+
+<ParamField path="System ID" type="string">
+  `n64`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  CRT (4:3 aspect ratio)
+</ParamField>
+
+**File formats**: `.n64`, `.z64`, `.v64`
+
+**Available cores**:
+- **mupen64plus-next** (recommended) - Modern, active development
+- **parallel-n64** - Vulkan-based, high accuracy
+
+**Special features**:
+- Expansion Pak support
+- Controller Pak saves
+- High-resolution rendering (future)
+
+<Warning>
+  N64 emulation is demanding. Some games may require higher-end hardware for full-speed emulation.
+</Warning>
+
+---
+
+### Nintendo DS
+
+<ParamField path="System ID" type="string">
+  `nds`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  LCD (dual screens, 4:3 per screen)
+</ParamField>
+
+**File formats**: `.nds`, `.dsi`, `.ids`
+
+**Available cores**:
+- **desmume** (recommended) - Mature, compatible
+- **melonDS** - Active development, improving accuracy
+
+**Special features**:
+- Dual-screen rendering
+- Touchscreen support (future)
+- Wi-Fi emulation (future)
+
+## Sega systems
+
+### Sega Genesis / Mega Drive
+
+<ParamField path="System ID" type="string">
+  `genesis`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  CRT (4:3 aspect ratio, NTSC/PAL)
+</ParamField>
+
+**File formats**: `.md`, `.smd`, `.gen`, `.bin`
+
+**Available cores**:
+- **genesis-plus-gx** (recommended) - Highly accurate, fast
+- **picodrive** - Lightweight, ARM-optimized
+
+**Special features**:
+- Sega CD support (future)
+- 32X support
+- Region switching (NTSC/PAL)
+
+---
+
+### Sega Saturn
+
+<ParamField path="System ID" type="string">
+  `saturn`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  CRT (4:3 aspect ratio)
+</ParamField>
+
+**File formats**: `.cue`, `.chd`, `.ccd`, `.mdf`
+
+**Available cores**:
+- **mednafen_saturn** (Beetle Saturn, recommended) - High accuracy
+- **yabause** - Broader compatibility, less accurate
+
+**BIOS requirements**:
+<Warning>
+  Saturn emulation **requires** BIOS files in `<userData>/BIOS/`:
+  - `sega_101.bin` (Japan BIOS)
+  - `mpr-17933.bin` (US/EU BIOS)
+  
+  Place these files in the BIOS directory before launching Saturn games.
+</Warning>
+
+**Special features**:
+- CHD (compressed) disc support
+- Multi-disc games
+- High-resolution 3D rendering
+
+<Note>
+  Saturn emulation is CPU-intensive due to the system's complex dual-CPU architecture. Expect higher resource usage than other 32-bit systems.
+</Note>
+
+## Sony systems
+
+### PlayStation (PS1)
+
+<ParamField path="System ID" type="string">
+  `psx`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  CRT (4:3 aspect ratio)
+</ParamField>
+
+**File formats**: `.cue`, `.bin`, `.iso`, `.chd`, `.pbp`
+
+**Available cores**:
+- **pcsx_rearmed** (recommended) - Fast, ARM-optimized
+- **beetle-psx** - High accuracy, enhanced rendering
+
+**Special features**:
+- CHD compressed disc format
+- Multi-disc games
+- Memory card management
+- Enhanced resolution rendering (future)
+
+<Tip>
+  Use `.chd` format for disc-based games to save space. CHD provides lossless compression and single-file convenience.
+</Tip>
+
+---
+
+### PlayStation Portable (PSP)
+
+<ParamField path="System ID" type="string">
+  `psp`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  LCD (16:9 widescreen, 480×272)
+</ParamField>
+
+**File formats**: `.iso`, `.cso`, `.pbp`
+
+**Available cores**:
+- **ppsspp** (recommended) - Active development, excellent compatibility
+
+**Special features**:
+- CSO compressed ISO format
+- High-resolution rendering (internal upscaling)
+- Save state support
+- Recommended shader: LCD PSP
+
+<Note>
+  PSP emulation is GPU-intensive. Enable the FPS counter to verify performance on your hardware.
+</Note>
+
+## Arcade
+
+### MAME / FinalBurn Neo
+
+<ParamField path="System ID" type="string">
+  `arcade`
+</ParamField>
+
+<ParamField path="Display Type" type="string">
+  CRT (various aspect ratios, game-dependent)
+</ParamField>
+
+**File formats**: `.zip`, `.7z`
+
+**Available cores**:
+- **mame** (recommended) - Comprehensive MAME romset support
+- **fbalpha** / **fbneo** - FinalBurn Neo, focused on accuracy
+
+**Special notes**:
+<Warning>
+  Arcade ROMs must remain in `.zip` format. Do NOT extract them - MAME cores expect zipped files.
+</Warning>
+
+**Romset compatibility**:
+- MAME romsets are version-specific
+- Ensure your ROMs match the core's MAME version
+- Use a romset manager (ClrMamePro) to verify/fix romsets
+
+## Core management
+
+### Automatic core downloads
+
+GameLord downloads cores on-demand:
+
+<Steps>
+  <Step title="First launch">
+    When you launch a game from a new system, GameLord checks if a core is installed.
+  </Step>
+  
+  <Step title="Download prompt">
+    If no core exists, GameLord automatically downloads the recommended core from the libretro buildbot.
+  </Step>
+  
+  <Step title="Core installation">
+    The core is saved to `<userData>/cores/<coreName>.dylib` (macOS) or `.dll` (Windows).
+  </Step>
+  
+  <Step title="Game launches">
+    Once the core is downloaded, the game launches normally.
+  </Step>
+</Steps>
+
+### Core storage
+
+Cores are stored in:
+
+- **macOS**: `~/Library/Application Support/GameLord/cores/`
+- **Windows**: `%APPDATA%/GameLord/cores/`
+- **Linux**: `~/.config/GameLord/cores/`
+
+You can also use cores from a RetroArch installation - GameLord checks RetroArch's core directory as a fallback.
+
+### Multiple cores per system
+
+Some systems have multiple core options:
+
+- NES: fceumm, nestopia, mesen
+- SNES: snes9x, bsnes, bsnes-mercury
+- GB/GBC: gambatte, sameboy, mgba
+- GBA: mgba, vba-m
+- N64: mupen64plus-next, parallel-n64
+- Genesis: genesis-plus-gx, picodrive
+- Saturn: mednafen_saturn, yabause
+- PS1: pcsx_rearmed, beetle-psx
+
+<Note>
+  Core selection per-game is planned for a future release. Currently, GameLord uses the first available core for each system.
+</Note>
+
+## System-specific tips
+
+<AccordionGroup>
+  <Accordion title="NES: Best settings">
+    - **Shader**: CRT Aperture or CRT Geom
+    - **Core**: fceumm (fast, accurate)
+    - **Aspect ratio**: 4:3 (native is 256×240, displayed as 4:3 on CRT)
+  </Accordion>
+  
+  <Accordion title="SNES: Performance vs. accuracy">
+    - **Fast**: snes9x (recommended for most users)
+    - **Accurate**: bsnes (cycle-perfect, higher CPU usage)
+    - **Balanced**: bsnes-mercury
+  </Accordion>
+  
+  <Accordion title="GBA: Color correction">
+    - Original GBA screen has washed-out colors
+    - Use LCD GBA shader to apply color correction matrix
+    - Without the shader, games look too dark/desaturated
+  </Accordion>
+  
+  <Accordion title="Saturn: BIOS setup">
+    1. Locate Saturn BIOS files (`sega_101.bin`, `mpr-17933.bin`)
+    2. Copy to `<userData>/BIOS/`
+    3. GameLord creates this folder automatically on first launch
+    4. Without BIOS, Saturn games will not load
+  </Accordion>
+  
+  <Accordion title="PS1: CHD format">
+    - CHD is a lossless compressed disc format
+    - Converts multi-file `.cue`+`.bin` into a single `.chd`
+    - Use `chdman` tool to convert: `chdman createcd -i game.cue -o game.chd`
+    - Saves ~40-60% disk space
+  </Accordion>
+  
+  <Accordion title="Arcade: Romset versions">
+    - MAME cores expect specific romset versions
+    - Check the core's MAME version (e.g., MAME 0.229)
+    - Use matching romset (e.g., "MAME 0.229 Non-Merged Set")
+    - Mismatched romsets cause "missing files" errors
+  </Accordion>
+</AccordionGroup>
+
+## Future system support
+
+GameLord's architecture is system-agnostic. Adding new systems is straightforward (system definition + core mapping). Planned additions include:
+
+- **PS2** (PCSX2 core)
+- **GameCube / Wii** (Dolphin core)
+- **Dreamcast** (Flycast core)
+- **3DO** (Opera core)
+- **TurboGrafx-16** (Beetle PCE core)
+- **Neo Geo** (FBNeo core)
+- **Atari 2600** (Stella core)
+- **Atari 7800** (ProSystem core)
+- **Atari Lynx** (Handy core)
+- **WonderSwan** (Beetle WonderSwan core)
+- **Virtual Boy** (Beetle VB core)
+
+<Note>
+  System additions depend on libretro core availability for ARM64 macOS. See [#116](https://github.com/ryanmagoon/gamelord/issues/116) for progress.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Game won't load">
+    - Verify ROM file format is supported for the system
+    - Check that the required core is downloaded (`<userData>/cores/`)
+    - For Saturn, ensure BIOS files are in `<userData>/BIOS/`
+    - Check console logs for core loading errors (Help > Toggle Developer Tools)
+  </Accordion>
+  
+  <Accordion title="Core download failed">
+    - Check internet connection
+    - Verify libretro buildbot is accessible (https://buildbot.libretro.com)
+    - Try manually downloading the core and placing it in `<userData>/cores/`
+    - Check firewall settings (may block downloads)
+  </Accordion>
+  
+  <Accordion title="Wrong system detected">
+    - Some file extensions overlap (e.g., `.bin` for Genesis and PS1)
+    - Use folder-based detection: place ROMs in system-named folders
+    - Alternatively, specify the system when scanning
+  </Accordion>
+</AccordionGroup>

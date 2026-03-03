@@ -1,0 +1,428 @@
+---
+title: ArtworkService
+description: Orchestrates artwork and metadata syncing with ScreenScraper API
+---
+
+The `ArtworkService` class manages the artwork and metadata pipeline: hashing ROMs, querying ScreenScraper, downloading images, and updating the library. It extends EventEmitter to report progress to the renderer.
+
+## Constructor
+
+```typescript
+const artworkService = new ArtworkService(libraryService);
+```
+
+<ParamField path="libraryService" type="LibraryService" required>
+  LibraryService instance for accessing game data
+</ParamField>
+
+Automatically loads configuration from disk and backfills aspect ratios for legacy games.
+
+## Credentials management
+
+### hasCredentials()
+
+Check whether ScreenScraper user credentials are configured.
+
+```typescript
+if (!artworkService.hasCredentials()) {
+  console.log('Please configure ScreenScraper credentials');
+}
+```
+
+**Returns:** `boolean`
+
+### validateCredentials()
+
+Validate credentials against ScreenScraper before storing them. Makes a lightweight API call to check if the credentials are accepted.
+
+```typescript
+const result = await artworkService.validateCredentials(
+  'myUsername',
+  'myPassword'
+);
+
+if (result.valid) {
+  console.log('Credentials are valid');
+} else {
+  console.error(`Invalid: ${result.error}`);
+  console.error(`Error code: ${result.errorCode}`);
+}
+```
+
+<ParamField path="userId" type="string" required>
+  ScreenScraper username
+</ParamField>
+
+<ParamField path="userPassword" type="string" required>
+  ScreenScraper password
+</ParamField>
+
+**Returns:** `Promise<{ valid: boolean; error?: string; errorCode?: ArtworkErrorCode }>`
+
+<ResponseField name="valid" type="boolean">
+  Whether credentials are valid
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  Error message (if validation failed)
+</ResponseField>
+
+<ResponseField name="errorCode" type="ArtworkErrorCode">
+  Structured error code: `'auth-failed'`, `'rate-limited'`, `'config-error'`, `'network-error'`, `'not-found'`
+</ResponseField>
+
+### setCredentials()
+
+Store ScreenScraper user credentials to disk.
+
+```typescript
+await artworkService.setCredentials('myUsername', 'myPassword');
+```
+
+<ParamField path="userId" type="string" required>
+  ScreenScraper username
+</ParamField>
+
+<ParamField path="userPassword" type="string" required>
+  ScreenScraper password
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+<Note>
+Credentials are stored in plain text in `artwork-config.json`. For production use, consider encrypting them with Electron's safeStorage API.
+</Note>
+
+### clearCredentials()
+
+Remove stored credentials.
+
+```typescript
+await artworkService.clearCredentials();
+```
+
+**Returns:** `Promise<void>`
+
+## Artwork syncing
+
+### syncGame()
+
+Run the full artwork pipeline for a single game: query ScreenScraper by hash, fall back to name search, download artwork, and update metadata.
+
+```typescript
+const success = await artworkService.syncGame('abc123def456...');
+
+if (success) {
+  console.log('Artwork downloaded');
+} else {
+  console.log('Game not found in ScreenScraper');
+}
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID (from LibraryService)
+</ParamField>
+
+<ParamField path="force" type="boolean">
+  Force re-sync even if artwork already exists (default: false)
+</ParamField>
+
+**Returns:** `Promise<boolean>` - True if artwork was found and downloaded
+
+**Throws:** `ScreenScraperError` with `errorCode: 'auth-failed'` if credentials are invalid
+
+<Note>
+This method respects rate limiting (1.1s between requests) and includes automatic retry with backoff on rate limit errors.
+</Note>
+
+### syncAllGames()
+
+Sync artwork for all games that don't have cover art yet. Processes games serially with rate limiting.
+
+```typescript
+const status = await artworkService.syncAllGames();
+
+console.log(`Found: ${status.found}`);
+console.log(`Not found: ${status.notFound}`);
+console.log(`Errors: ${status.errors}`);
+```
+
+**Returns:** `Promise<ArtworkSyncStatus>`
+
+<ResponseField name="ArtworkSyncStatus" type="object">
+  <ResponseField name="inProgress" type="boolean">
+    Whether sync is still running
+  </ResponseField>
+  <ResponseField name="processed" type="number">
+    Number of games processed
+  </ResponseField>
+  <ResponseField name="total" type="number">
+    Total games to process
+  </ResponseField>
+  <ResponseField name="found" type="number">
+    Games with artwork found
+  </ResponseField>
+  <ResponseField name="notFound" type="number">
+    Games not found in ScreenScraper
+  </ResponseField>
+  <ResponseField name="errors" type="number">
+    Number of errors encountered
+  </ResponseField>
+</ResponseField>
+
+**Emits:**
+- `progress` - For each game (see ArtworkProgress below)
+- `syncComplete` - When batch finishes (with final status)
+
+<Warning>
+If a sync is already in progress, this returns immediately with `inProgress: true`.
+</Warning>
+
+### syncGames()
+
+Sync artwork for a specific list of game IDs. Used for auto-sync after ROM import to avoid re-syncing the entire library.
+
+```typescript
+const gameIds = ['abc123...', 'def456...'];
+const status = await artworkService.syncGames(gameIds);
+```
+
+<ParamField path="gameIds" type="string[]" required>
+  Array of game IDs to sync
+</ParamField>
+
+**Returns:** `Promise<ArtworkSyncStatus>`
+
+**Emits:** Same events as `syncAllGames()`
+
+<Note>
+Automatically filters out games that already have cover art or don't exist in the library.
+</Note>
+
+### cancelSync()
+
+Cancel an in-progress bulk sync.
+
+```typescript
+artworkService.cancelSync();
+```
+
+**Returns:** `void`
+
+<Note>
+The current game will finish processing, but no additional games will be synced.
+</Note>
+
+### getSyncStatus()
+
+Get current sync status.
+
+```typescript
+const status = artworkService.getSyncStatus();
+
+if (status.inProgress) {
+  console.log('Sync is running');
+}
+```
+
+**Returns:** `{ inProgress: boolean }`
+
+## Artwork storage
+
+### getArtworkDirectory()
+
+Returns the artwork directory path, creating it if needed.
+
+```typescript
+const artworkDir = artworkService.getArtworkDirectory();
+// e.g., '/Users/username/Library/Application Support/GameLord/artwork'
+```
+
+**Returns:** `string`
+
+### downloadArtwork()
+
+Download an image from a URL to the local artwork directory. Includes a 30-second timeout and automatic redirect following.
+
+```typescript
+const localPath = await artworkService.downloadArtwork(
+  'https://example.com/image.png',
+  'game-id.png'
+);
+```
+
+<ParamField path="imageUrl" type="string" required>
+  Source image URL
+</ParamField>
+
+<ParamField path="filename" type="string" required>
+  Destination filename (relative to artwork directory)
+</ParamField>
+
+**Returns:** `Promise<string>` - Full local path to the saved file
+
+**Throws:** Error if download fails or times out
+
+## Events
+
+ArtworkService extends EventEmitter and emits the following events:
+
+<ResponseField name="progress" type="ArtworkProgress">
+  Emitted for each game during batch sync
+  <ResponseField name="gameId" type="string">
+    Game ID
+  </ResponseField>
+  <ResponseField name="gameTitle" type="string">
+    Game title
+  </ResponseField>
+  <ResponseField name="phase" type="string">
+    Current phase: `'hashing'`, `'querying'`, `'downloading'`, `'done'`, `'not-found'`, `'error'`
+  </ResponseField>
+  <ResponseField name="current" type="number">
+    Current game index (1-based)
+  </ResponseField>
+  <ResponseField name="total" type="number">
+    Total games in batch
+  </ResponseField>
+  <ResponseField name="coverArt" type="string">
+    Cover art URL (only in `'done'` phase)
+  </ResponseField>
+  <ResponseField name="coverArtAspectRatio" type="number">
+    Aspect ratio (only in `'done'` phase)
+  </ResponseField>
+  <ResponseField name="error" type="string">
+    Error message (only in `'error'` phase)
+  </ResponseField>
+  <ResponseField name="errorCode" type="ArtworkErrorCode">
+    Error code (only in `'error'` phase)
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="syncComplete" type="ArtworkSyncStatus">
+  Emitted when a batch sync finishes (successfully or after cancellation)
+</ResponseField>
+
+## Rate limiting
+
+ArtworkService enforces ScreenScraper's rate limits:
+
+- **1.1 seconds** minimum delay between API requests
+- **10 seconds** backoff after a 429 (rate limited) response
+- **30 seconds** timeout for image downloads
+
+<Note>
+Rate limits are automatically managed internally. You don't need to implement throttling in your own code.
+</Note>
+
+## Error handling
+
+All errors from ScreenScraper include a structured `errorCode`:
+
+```typescript
+try {
+  await artworkService.syncGame(gameId);
+} catch (error) {
+  if (error instanceof ScreenScraperError) {
+    switch (error.errorCode) {
+      case 'auth-failed':
+        console.error('Invalid credentials');
+        break;
+      case 'rate-limited':
+        console.error('Rate limit exceeded');
+        break;
+      case 'not-found':
+        console.error('Game not in database');
+        break;
+      case 'network-error':
+        console.error('Network issue');
+        break;
+      case 'config-error':
+        console.error('Missing configuration');
+        break;
+    }
+  }
+}
+```
+
+<Warning>
+Auth and config errors (`auth-failed`, `config-error`) stop batch syncs immediately since continuing would fail for all games.
+</Warning>
+
+## Usage example
+
+```typescript
+import { ArtworkService } from './ArtworkService';
+import { LibraryService } from './LibraryService';
+
+const libraryService = new LibraryService();
+const artworkService = new ArtworkService(libraryService);
+
+// Set up credentials
+const validation = await artworkService.validateCredentials(
+  'username',
+  'password'
+);
+
+if (validation.valid) {
+  await artworkService.setCredentials('username', 'password');
+}
+
+// Listen for progress
+artworkService.on('progress', (progress) => {
+  console.log(`[${progress.current}/${progress.total}] ${progress.gameTitle}`);
+  console.log(`  Phase: ${progress.phase}`);
+  
+  if (progress.phase === 'done') {
+    console.log(`  Cover art: ${progress.coverArt}`);
+  } else if (progress.phase === 'error') {
+    console.error(`  Error: ${progress.error}`);
+  }
+});
+
+artworkService.on('syncComplete', (status) => {
+  console.log(`\nSync complete:`);
+  console.log(`  Found: ${status.found}`);
+  console.log(`  Not found: ${status.notFound}`);
+  console.log(`  Errors: ${status.errors}`);
+});
+
+// Sync all games
+await artworkService.syncAllGames();
+
+// Or sync specific games
+const newGameIds = ['abc123...', 'def456...'];
+await artworkService.syncGames(newGameIds);
+```
+
+## Implementation details
+
+### Aspect ratio clamping
+
+Cover art aspect ratios are clamped to [0.4, 1.8] to accommodate both portrait and landscape box art:
+
+```typescript
+const rawRatio = dimensions.width / dimensions.height;
+const coverArtAspectRatio = Math.max(0.4, Math.min(1.8, rawRatio));
+```
+
+### Hash matching priority
+
+The service queries ScreenScraper in this order:
+
+1. **MD5 hash** (fastest, most reliable)
+2. **Fallback to name search** (if hash lookup fails)
+
+MD5 hashes are pre-computed during ROM scan and stored in `game.romHashes.md5`.
+
+### Artwork URL priority
+
+When multiple artwork types are available, the service prefers:
+
+1. `boxArt2d` (front cover)
+2. `boxArt3d` (3D box render)
+3. `screenshot` (in-game screenshot)
+
+## Source reference
+
+- Implementation: `apps/desktop/src/main/services/ArtworkService.ts:36`
+- Usage example: `apps/desktop/src/main/ipc/handlers.ts:23`

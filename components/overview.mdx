@@ -1,0 +1,98 @@
+---
+title: UI components overview
+description: GameLord's UI component library built with React and TypeScript
+---
+
+GameLord's UI is built with a custom component library that provides consistent, polished components for retro gaming interfaces. All components are built with React, TypeScript, and Tailwind CSS.
+
+## Key features
+
+- **Type-safe props** - All components use TypeScript interfaces for full type safety
+- **Accessibility** - Components follow ARIA best practices with keyboard navigation support
+- **Animations** - Smooth transitions and microinteractions throughout
+- **Artwork sync** - Real-time cover art downloading with visual feedback
+- **Performance** - Optimized for large libraries with virtualization and memoization
+
+## Component architecture
+
+The component library is organized in two packages:
+
+- `@gamelord/ui` - Shared UI components (GameCard, GameDetails, GameLibrary)
+- `apps/desktop/src/renderer/components` - Desktop-specific components (LibraryView, GameWindow)
+
+## Core components
+
+<CardGroup cols={2}>
+  <Card title="GameCard" icon="image" href="/components/game-card">
+    Display game cover art with hover effects and artwork sync states
+  </Card>
+  <Card title="GameDetails" icon="info" href="/components/game-details">
+    Full game details view with stats and metadata
+  </Card>
+  <Card title="LibraryView" icon="grid-3x3" href="/components/library-view">
+    Main library interface with filtering, search, and system tabs
+  </Card>
+  <Card title="GameWindow" icon="tv" href="/components/game-window">
+    Native game window with emulation controls and shaders
+  </Card>
+</CardGroup>
+
+## Shared types
+
+All components use the `Game` interface for consistency:
+
+```typescript packages/ui/components/GameCard.tsx
+export interface Game {
+  id: string
+  title: string
+  platform: string
+  systemId?: string
+  genre?: string
+  coverArt?: string
+  coverArtAspectRatio?: number
+  romPath: string
+  lastPlayed?: Date
+  playTime?: number
+  favorite?: boolean
+}
+```
+
+## Import paths
+
+```typescript
+// UI package components
+import { GameCard, GameDetails, GameLibrary } from '@gamelord/ui'
+
+// Desktop-specific components
+import { LibraryView } from '../components/LibraryView'
+import { GameWindow } from '../components/GameWindow'
+```
+
+## Design principles
+
+### Microinteractions
+
+Every user action has visual feedback:
+
+- Hover states with scale transforms
+- Favorite button pop animation
+- Loading shimmer effects
+- TV static for artwork sync
+
+### Performance
+
+Components are optimized for large game libraries:
+
+- React.memo with custom comparators
+- Virtualized rendering for 100+ items
+- FLIP animations for smooth transitions
+- External stores to bypass React re-renders
+
+### Accessibility
+
+All interactive components support:
+
+- Keyboard navigation (Tab, Enter, Space)
+- ARIA labels and roles
+- Focus visible states
+- Screen reader announcements

@@ -1,0 +1,472 @@
+---
+title: EmulationWorkerClient
+description: Main-process client for the emulation utility process with zero-copy frame transfer
+---
+
+The `EmulationWorkerClient` class manages a dedicated Electron utility process that runs the emulation loop with the native libretro addon. It provides an async API for all emulation operations and emits events for video frames, audio samples, and errors.
+
+<Note>
+This client communicates with a worker process via `postMessage` and supports zero-copy frame/audio transfer using `SharedArrayBuffer` when available.
+</Note>
+
+## Constructor
+
+```typescript
+const worker = new EmulationWorkerClient()
+```
+
+Creates a new worker client. Call `init()` to spawn the utility process and load a game.
+
+## Methods
+
+### init
+
+Spawn the utility process, load the core and ROM, and start the emulation loop.
+
+```typescript
+await init(options: EmulationWorkerInitOptions): Promise<AVInfo>
+```
+
+<ParamField path="options.corePath" type="string" required>
+  Absolute path to the libretro core (.dylib, .dll, or .so)
+</ParamField>
+
+<ParamField path="options.romPath" type="string" required>
+  Absolute path to the ROM file
+</ParamField>
+
+<ParamField path="options.systemDir" type="string" required>
+  Directory containing BIOS files (e.g., `userData/BIOS`)
+</ParamField>
+
+<ParamField path="options.saveDir" type="string" required>
+  Directory for game saves
+</ParamField>
+
+<ParamField path="options.sramDir" type="string" required>
+  Directory for SRAM/battery saves
+</ParamField>
+
+<ParamField path="options.saveStatesDir" type="string" required>
+  Directory for save states
+</ParamField>
+
+<ParamField path="options.addonPath" type="string" required>
+  Path to the native libretro addon (.node)
+</ParamField>
+
+<ResponseField name="avInfo" type="AVInfo">
+  Audio/video information from the loaded core
+  
+  <Expandable title="AVInfo structure">
+    ```typescript
+    interface AVInfo {
+      geometry: {
+        baseWidth: number
+        baseHeight: number
+        maxWidth: number
+        maxHeight: number
+        aspectRatio: number
+      }
+      timing: {
+        fps: number
+        sampleRate: number
+      }
+    }
+    ```
+  </Expandable>
+</ResponseField>
+
+<Warning>
+If the worker does not become ready within 10 seconds, the Promise will reject with a timeout error.
+</Warning>
+
+#### Example
+
+```typescript
+const worker = new EmulationWorkerClient()
+
+const avInfo = await worker.init({
+  corePath: '/path/to/snes9x_libretro.dylib',
+  romPath: '/path/to/game.sfc',
+  systemDir: app.getPath('userData') + '/BIOS',
+  saveDir: app.getPath('userData') + '/saves',
+  sramDir: app.getPath('userData') + '/saves',
+  saveStatesDir: app.getPath('userData') + '/savestates',
+  addonPath: '/path/to/libretro.node'
+})
+
+console.log(`Loaded: ${avInfo.geometry.baseWidth}x${avInfo.geometry.baseHeight} @ ${avInfo.timing.fps}fps`)
+```
+
+### Input control
+
+#### setInput
+
+Forward input to the emulation core. Fire-and-forget — no response expected.
+
+```typescript
+setInput(port: number, id: number, pressed: boolean): void
+```
+
+<ParamField path="port" type="number" required>
+  Controller port (0-based)
+</ParamField>
+
+<ParamField path="id" type="number" required>
+  Button/input ID (libretro constant, e.g., `RETRO_DEVICE_ID_JOYPAD_A`)
+</ParamField>
+
+<ParamField path="pressed" type="boolean" required>
+  Whether the button is pressed (`true`) or released (`false`)
+</ParamField>
+
+<Note>
+Input commands are high-frequency and do not return responses. The worker applies them immediately to the next frame.
+</Note>
+
+### Playback control
+
+#### pause
+
+```typescript
+pause(): void
+```
+
+Pauses the emulation loop. Emits a `paused` event.
+
+#### resume
+
+```typescript
+resume(): void
+```
+
+Resumes the emulation loop. Emits a `resumed` event.
+
+#### reset
+
+```typescript
+reset(): void
+```
+
+Resets the emulation core. Emits a `reset` event.
+
+#### setSpeed
+
+```typescript
+setSpeed(multiplier: number): void
+```
+
+<ParamField path="multiplier" type="number" required>
+  Speed multiplier (e.g., 1.0 = normal, 2.0 = 2x speed, 0.5 = half speed)
+</ParamField>
+
+Adjusts emulation speed. Useful for fast-forward or slow-motion.
+
+### Save state management
+
+#### saveState
+
+```typescript
+await saveState(slot: number): Promise<void>
+```
+
+<ParamField path="slot" type="number" required>
+  Save state slot number (0-9)
+</ParamField>
+
+Saves the current emulation state to the specified slot.
+
+#### loadState
+
+```typescript
+await loadState(slot: number): Promise<void>
+```
+
+<ParamField path="slot" type="number" required>
+  Save state slot number (0-9)
+</ParamField>
+
+Loads emulation state from the specified slot.
+
+#### saveSram
+
+```typescript
+await saveSram(): Promise<void>
+```
+
+Flushes SRAM/battery save data to disk.
+
+<Note>
+This is called automatically during shutdown, but you can call it manually to ensure saves are written immediately.
+</Note>
+
+### Screenshot
+
+```typescript
+await screenshot(outputPath?: string): Promise<string>
+```
+
+<ParamField path="outputPath" type="string">
+  Optional output path. If not provided, a default path will be generated.
+</ParamField>
+
+<ResponseField name="path" type="string">
+  Absolute path to the saved screenshot file
+</ResponseField>
+
+Captures the current frame as a PNG image.
+
+#### Example
+
+```typescript
+const path = await worker.screenshot()
+console.log('Screenshot saved:', path)
+```
+
+### Lifecycle management
+
+#### prepareForQuit
+
+```typescript
+prepareForQuit(): void
+```
+
+Mark the worker as shutting down so that a process exit during the async shutdown sequence doesn't emit an unexpected-exit error.
+
+<Warning>
+Call this synchronously at the start of app quit, before awaiting the full shutdown handshake.
+</Warning>
+
+#### shutdown
+
+```typescript
+await shutdown(): Promise<void>
+```
+
+Gracefully shut down the emulation worker. Saves SRAM, destroys the native core, and waits for the process to exit.
+
+If the worker doesn't respond within 5 seconds, the process is force-killed.
+
+#### destroy
+
+```typescript
+await destroy(): Promise<void>
+```
+
+Alias for `shutdown()` — matches the lifecycle naming used elsewhere.
+
+#### isRunning
+
+```typescript
+isRunning(): boolean
+```
+
+Returns `true` if the worker process is alive and running.
+
+### Zero-copy frame transfer
+
+#### getSharedBuffers
+
+```typescript
+getSharedBuffers(): SharedBuffers | null
+```
+
+<ResponseField name="SharedBuffers" type="object | null">
+  Returns `null` if SharedArrayBuffer is unavailable
+  
+  <Expandable title="SharedBuffers structure">
+    ```typescript
+    interface SharedBuffers {
+      control: SharedArrayBuffer  // 32 bytes (8 × Int32)
+      video: SharedArrayBuffer    // Double-buffered RGBA8888 frames
+      audio: SharedArrayBuffer    // Ring buffer (32768 Int16 samples)
+    }
+    ```
+  </Expandable>
+</ResponseField>
+
+Returns the `SharedArrayBuffer` instances for zero-copy frame/audio transfer. If `SharedArrayBuffer` is unavailable (or allocation failed), returns `null` and the worker falls back to copy-based IPC.
+
+<Note>
+When SharedArrayBuffer mode is active, video frames and audio samples are written directly to shared memory instead of being copied through IPC. The renderer process can read frames via `Atomics.load()` without blocking the worker.
+</Note>
+
+#### Control buffer layout
+
+The control SAB uses an `Int32Array` view with the following fields:
+
+| Index | Field | Description |
+|-------|-------|-------------|
+| 0 | `activeBuffer` | Which video buffer the renderer should read (0 or 1) |
+| 1 | `frameSequence` | Monotonically increasing frame counter |
+| 2 | `frameWidth` | Current frame width in pixels |
+| 3 | `frameHeight` | Current frame height in pixels |
+| 4 | `audioWritePos` | Ring buffer write position (Int16 sample count) |
+| 5 | `audioReadPos` | Ring buffer read position (Int16 sample count) |
+| 6 | `audioSampleRate` | Sample rate reported by core (44100, 48000, etc.) |
+| 7 | — | Reserved |
+
+#### Example renderer usage
+
+```typescript
+const buffers = worker.getSharedBuffers()
+if (!buffers) {
+  // Fall back to IPC events
+  worker.on('videoFrame', ({ data, width, height }) => {
+    renderFrame(data, width, height)
+  })
+} else {
+  // Use zero-copy transfer
+  const ctrl = new Int32Array(buffers.control)
+  
+  function renderLoop() {
+    const seq = Atomics.load(ctrl, 1) // frameSequence
+    if (seq > lastSeq) {
+      const width = Atomics.load(ctrl, 2)
+      const height = Atomics.load(ctrl, 3)
+      const bufferIndex = Atomics.load(ctrl, 0) // activeBuffer
+      
+      // Read from the active video buffer
+      const frameSize = width * height * 4
+      const offset = bufferIndex * maxFrameSize
+      const frameData = new Uint8Array(buffers.video, offset, frameSize)
+      
+      renderFrame(frameData, width, height)
+      lastSeq = seq
+    }
+    requestAnimationFrame(renderLoop)
+  }
+  
+  renderLoop()
+}
+```
+
+## Events
+
+Inherits from `EventEmitter` and emits the following events:
+
+### videoFrame
+
+Emitted when a new video frame is available (copy-based IPC mode only).
+
+```typescript
+worker.on('videoFrame', ({ data, width, height }) => {
+  // data: Buffer — RGBA8888 pixel data
+  // width: number — Frame width in pixels
+  // height: number — Frame height in pixels
+})
+```
+
+<Note>
+Not emitted when SharedArrayBuffer mode is active — use `getSharedBuffers()` instead.
+</Note>
+
+### audioSamples
+
+Emitted when audio samples are available (copy-based IPC mode only).
+
+```typescript
+worker.on('audioSamples', ({ samples, sampleRate }) => {
+  // samples: Buffer — Stereo Int16 PCM samples
+  // sampleRate: number — Sample rate (e.g., 44100)
+})
+```
+
+### error
+
+Emitted when the worker encounters an error.
+
+```typescript
+worker.on('error', ({ message, fatal }) => {
+  // message: string — Error description
+  // fatal: boolean — Whether the error is unrecoverable
+})
+```
+
+<Warning>
+Fatal errors indicate the worker has crashed or cannot continue. You should call `destroy()` and notify the user.
+</Warning>
+
+### speedChanged
+
+Emitted when emulation speed changes.
+
+```typescript
+worker.on('speedChanged', ({ multiplier }) => {
+  // multiplier: number — New speed multiplier
+})
+```
+
+### Lifecycle events
+
+- `paused` — Emulation loop paused
+- `resumed` — Emulation loop resumed
+- `reset` — Core was reset
+
+## Worker protocol
+
+The worker communicates via `postMessage` with a structured command/event protocol.
+
+### Commands (Main → Worker)
+
+All commands are objects with an `action` field:
+
+```typescript
+type WorkerCommand =
+  | { action: 'init'; corePath: string; romPath: string; /* ... */ }
+  | { action: 'pause' }
+  | { action: 'resume' }
+  | { action: 'reset' }
+  | { action: 'input'; port: number; id: number; pressed: boolean }
+  | { action: 'saveState'; slot: number; requestId: string }
+  | { action: 'loadState'; slot: number; requestId: string }
+  | { action: 'saveSram'; requestId: string }
+  | { action: 'screenshot'; requestId: string; outputPath?: string }
+  | { action: 'setSpeed'; multiplier: number }
+  | { action: 'shutdown'; requestId: string }
+  | { action: 'setupSharedBuffers'; /* SABs */ }
+```
+
+Commands that require a response include a `requestId` field. The worker replies with a `response` event containing the same ID.
+
+### Events (Worker → Main)
+
+```typescript
+type WorkerEvent =
+  | { type: 'ready'; avInfo: AVInfo }
+  | { type: 'videoFrame'; data: Buffer; width: number; height: number }
+  | { type: 'audioSamples'; samples: Buffer; sampleRate: number }
+  | { type: 'error'; message: string; fatal: boolean }
+  | { type: 'log'; level: number; message: string }
+  | { type: 'speedChanged'; multiplier: number }
+  | { type: 'response'; requestId: string; success: boolean; data?: unknown; error?: string }
+```
+
+## Performance considerations
+
+### Request timeout
+
+By default, requests time out after 10 seconds. The `shutdown` command uses a 5-second timeout. If a request times out, the Promise rejects and the pending request is cleaned up.
+
+### Zero-copy frame transfer
+
+When `SharedArrayBuffer` is available, video frames and audio samples are written directly to shared memory. This eliminates the overhead of copying large buffers through IPC and is critical for 120Hz+ displays.
+
+**Without SAB** (copy-based IPC):
+- Each frame: ~2MB copy (1920×1080 RGBA) + IPC overhead
+- At 60fps: ~120MB/s copied through IPC
+
+**With SAB** (zero-copy):
+- Worker writes directly to shared memory
+- Renderer reads via `Atomics.load()` (no copy)
+- Double-buffered to prevent tearing
+
+<Note>
+Zero-copy mode is essential for maintaining 60fps+ on high-resolution displays. Always check `getSharedBuffers()` and implement a fallback for IPC mode.
+</Note>
+
+## Related
+
+- [LibretroNativeCore](/api/emulator/libretro-core) — Native core wrapper with path validation
+- [CoreDownloader](/api/emulator/core-downloader) — Download and manage libretro cores

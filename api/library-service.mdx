@@ -1,0 +1,483 @@
+---
+title: LibraryService
+description: Manages the game library, ROM scanning, and metadata storage
+---
+
+The `LibraryService` class handles game discovery, cataloging, and management. It scans ROM directories, computes file hashes for reliable identification, and maintains a persistent library with support for zip archives.
+
+## Constructor
+
+```typescript
+const libraryService = new LibraryService();
+```
+
+Automatically loads the library configuration and existing game data from disk.
+
+## Configuration
+
+### getConfig()
+
+Get the current library configuration.
+
+```typescript
+const config = libraryService.getConfig();
+```
+
+**Returns:** `LibraryConfig`
+
+<ResponseField name="LibraryConfig" type="object">
+  <ResponseField name="systems" type="GameSystem[]">
+    Array of configured game systems
+  </ResponseField>
+  <ResponseField name="romsBasePath" type="string">
+    Base directory for ROM files
+  </ResponseField>
+  <ResponseField name="scanRecursive" type="boolean">
+    Whether to scan subdirectories
+  </ResponseField>
+  <ResponseField name="autoScan" type="boolean">
+    Whether to auto-scan on startup
+  </ResponseField>
+</ResponseField>
+
+### setRomsBasePath()
+
+Set the base directory for ROM files. Each system gets a subdirectory under this path.
+
+```typescript
+await libraryService.setRomsBasePath('/Users/username/ROMs');
+```
+
+<ParamField path="basePath" type="string" required>
+  Absolute path to the ROMs base directory
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+## System management
+
+### getSystems()
+
+Get all configured game systems.
+
+```typescript
+const systems = libraryService.getSystems();
+```
+
+**Returns:** `GameSystem[]`
+
+<ResponseField name="GameSystem" type="object">
+  <ResponseField name="id" type="string">
+    Unique system identifier (e.g., `'nes'`, `'snes'`)
+  </ResponseField>
+  <ResponseField name="name" type="string">
+    Display name (e.g., `'Nintendo Entertainment System'`)
+  </ResponseField>
+  <ResponseField name="shortName" type="string">
+    Short name for folders (e.g., `'NES'`)
+  </ResponseField>
+  <ResponseField name="manufacturer" type="string">
+    Console manufacturer
+  </ResponseField>
+  <ResponseField name="generation" type="number">
+    Console generation number
+  </ResponseField>
+  <ResponseField name="releaseYear" type="number">
+    Release year
+  </ResponseField>
+  <ResponseField name="extensions" type="string[]">
+    Supported file extensions (e.g., `['.nes', '.unf']`)
+  </ResponseField>
+  <ResponseField name="romsPath" type="string">
+    Directory path where ROMs for this system are stored
+  </ResponseField>
+</ResponseField>
+
+### addSystem()
+
+Add a new game system to the configuration.
+
+```typescript
+await libraryService.addSystem({
+  id: 'psx',
+  name: 'PlayStation',
+  shortName: 'PSX',
+  manufacturer: 'Sony',
+  generation: 5,
+  releaseYear: 1994,
+  extensions: ['.bin', '.cue', '.iso'],
+  romsPath: '/path/to/psx/roms'
+});
+```
+
+<ParamField path="system" type="GameSystem" required>
+  System configuration object
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+### removeSystem()
+
+Remove a system and all its games from the library.
+
+```typescript
+await libraryService.removeSystem('psx');
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+<Warning>
+This also deletes cached ROM files extracted from zip archives for this system.
+</Warning>
+
+### updateSystemPath()
+
+Update the ROM directory path for a system.
+
+```typescript
+await libraryService.updateSystemPath('nes', '/new/path/to/nes/roms');
+```
+
+<ParamField path="systemId" type="string" required>
+  System identifier
+</ParamField>
+
+<ParamField path="romsPath" type="string" required>
+  New directory path
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+## Game management
+
+### getGames()
+
+Get all games, optionally filtered by system.
+
+```typescript
+// Get all games
+const allGames = libraryService.getGames();
+
+// Get NES games only
+const nesGames = libraryService.getGames('nes');
+```
+
+<ParamField path="systemId" type="string">
+  Optional system filter
+</ParamField>
+
+**Returns:** `Game[]`
+
+<ResponseField name="Game" type="object">
+  <ResponseField name="id" type="string">
+    Unique game ID (SHA-256 hash of ROM content)
+  </ResponseField>
+  <ResponseField name="title" type="string">
+    Game title
+  </ResponseField>
+  <ResponseField name="system" type="string">
+    System display name
+  </ResponseField>
+  <ResponseField name="systemId" type="string">
+    System identifier
+  </ResponseField>
+  <ResponseField name="romPath" type="string">
+    Path to the ROM file
+  </ResponseField>
+  <ResponseField name="romMtime" type="number">
+    File modification timestamp (for cache invalidation)
+  </ResponseField>
+  <ResponseField name="romHashes" type="RomHashes">
+    ROM hashes (CRC32, SHA-1, MD5) used for matching against databases
+  </ResponseField>
+  <ResponseField name="sourceArchivePath" type="string">
+    Original zip file path (if extracted from zip)
+  </ResponseField>
+  <ResponseField name="coverArt" type="string">
+    Cover art URL (e.g., `artwork://abc123.png`)
+  </ResponseField>
+  <ResponseField name="coverArtAspectRatio" type="number">
+    Aspect ratio for dynamic card sizing (0.4-1.8)
+  </ResponseField>
+  <ResponseField name="metadata" type="object">
+    Game metadata (developer, publisher, genre, description, etc.)
+  </ResponseField>
+</ResponseField>
+
+### getGame()
+
+Get a single game by ID.
+
+```typescript
+const game = libraryService.getGame('abc123def456...');
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID (SHA-256 hash)
+</ParamField>
+
+**Returns:** `Game | undefined`
+
+### addGame()
+
+Manually add a single game to the library.
+
+```typescript
+const game = await libraryService.addGame(
+  '/path/to/game.nes',
+  'nes'
+);
+```
+
+<ParamField path="romPath" type="string" required>
+  Full path to the ROM file
+</ParamField>
+
+<ParamField path="systemId" type="string" required>
+  System identifier
+</ParamField>
+
+**Returns:** `Promise<Game | null>` - Returns null if the file is not a valid ROM for the system
+
+<Note>
+For zip files on non-arcade systems, this automatically extracts the first matching ROM and caches it.
+</Note>
+
+### removeGame()
+
+Remove a game from the library.
+
+```typescript
+await libraryService.removeGame('abc123def456...');
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+<Note>
+If the game was extracted from a zip archive, the cached ROM file is automatically deleted.
+</Note>
+
+### updateGame()
+
+Update game metadata.
+
+```typescript
+await libraryService.updateGame('abc123def456...', {
+  title: 'Super Mario Bros.',
+  metadata: {
+    developer: 'Nintendo',
+    releaseDate: '1985-09-13'
+  }
+});
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID
+</ParamField>
+
+<ParamField path="updates" type="Partial<Game>" required>
+  Fields to update
+</ParamField>
+
+**Returns:** `Promise<void>`
+
+## Scanning
+
+### scanDirectory()
+
+Scan a directory for ROM files and add them to the library. This is the core scanning method that powers all other scan operations.
+
+```typescript
+// Scan without system filter (auto-detect from folder names)
+const games = await libraryService.scanDirectory('/path/to/roms');
+
+// Scan with system filter
+const nesGames = await libraryService.scanDirectory('/path/to/nes/roms', 'nes');
+```
+
+<ParamField path="directoryPath" type="string" required>
+  Directory to scan
+</ParamField>
+
+<ParamField path="systemId" type="string">
+  Optional system filter. If omitted, auto-detects system from folder names.
+</ParamField>
+
+**Returns:** `Promise<Game[]>` - Array of discovered games
+
+**Emits:** `scanProgress` event for each game processed
+
+<ResponseField name="ScanProgressEvent" type="object">
+  Progress event emitted during scanning
+  <ResponseField name="game" type="Game">
+    The game that was just discovered or re-verified
+  </ResponseField>
+  <ResponseField name="isNew" type="boolean">
+    Whether this game is newly added (true) or already existed (false)
+  </ResponseField>
+  <ResponseField name="processed" type="number">
+    Number of files processed so far
+  </ResponseField>
+  <ResponseField name="total" type="number">
+    Total number of ROM files found
+  </ResponseField>
+  <ResponseField name="skipped" type="number">
+    Number of files skipped via mtime cache (no re-hash needed)
+  </ResponseField>
+</ResponseField>
+
+### scanSystemFolders()
+
+Scan all configured system ROM directories.
+
+```typescript
+const allGames = await libraryService.scanSystemFolders();
+```
+
+**Returns:** `Promise<Game[]>` - Array of all discovered games across all systems
+
+**Emits:** `scanProgress` event for each game processed
+
+## ROM hashing
+
+### computeRomHashes()
+
+Compute CRC32, SHA-1, and MD5 hashes for a ROM file in a single pass. Also returns the SHA-256 game ID.
+
+```typescript
+const { gameId, hashes } = await libraryService.computeRomHashes('/path/to/game.nes');
+
+console.log(gameId); // SHA-256 hash (64 hex chars)
+console.log(hashes.crc32); // CRC32 (8 hex chars)
+console.log(hashes.sha1); // SHA-1 (40 hex chars)
+console.log(hashes.md5); // MD5 (32 hex chars)
+```
+
+<ParamField path="romPath" type="string" required>
+  Path to the ROM file
+</ParamField>
+
+**Returns:** `Promise<{ gameId: string; hashes: RomHashes }>`
+
+<ResponseField name="RomHashes" type="object">
+  <ResponseField name="crc32" type="string">
+    CRC32 checksum (8 hex chars)
+  </ResponseField>
+  <ResponseField name="sha1" type="string">
+    SHA-1 hash (40 hex chars)
+  </ResponseField>
+  <ResponseField name="md5" type="string">
+    MD5 hash (32 hex chars)
+  </ResponseField>
+</ResponseField>
+
+**Throws:** Error if the file is unreadable
+
+<Note>
+This method streams the file and computes all hashes in parallel, making it efficient for large ROM files.
+</Note>
+
+## Events
+
+LibraryService extends EventEmitter and emits the following events:
+
+<ResponseField name="scanProgress" type="ScanProgressEvent">
+  Emitted for each game discovered during a scan. This allows the UI to show real-time progress and display games as they're found.
+</ResponseField>
+
+## Performance optimizations
+
+LibraryService implements several optimizations for fast scanning:
+
+### mtime cache
+
+Files are only re-hashed if their modification time has changed. Scanning unchanged directories is near-instant.
+
+### Reverse indexes
+
+O(1) lookups by ROM path and archive path using internal maps:
+
+```typescript
+// Internal implementation (not exposed in public API)
+private romPathIndex: Map<string, string> = new Map();
+private archivePathIndex: Map<string, string> = new Map();
+```
+
+### Prioritized processing
+
+New (unknown) files are processed first so they appear in the UI immediately. Known files are verified in the background.
+
+### Bounded concurrency
+
+Hashes 4 files in parallel to maximize throughput without overwhelming the disk I/O:
+
+```typescript
+const HASH_CONCURRENCY = 4;
+```
+
+### Zip extraction caching
+
+Extracted ROMs from zip archives are cached with hash-prefixed filenames to avoid re-extraction on subsequent scans.
+
+## Usage example
+
+```typescript
+import { LibraryService } from './LibraryService';
+
+const libraryService = new LibraryService();
+
+// Listen for scan progress
+libraryService.on('scanProgress', (event) => {
+  console.log(`Found: ${event.game.title} (${event.processed}/${event.total})`);
+  if (event.isNew) {
+    console.log('  → New game!');
+  }
+});
+
+// Configure ROMs base path
+await libraryService.setRomsBasePath('/Users/username/ROMs');
+
+// Scan all system folders
+const games = await libraryService.scanSystemFolders();
+console.log(`Library: ${games.length} games`);
+
+// Get games for a specific system
+const nesGames = libraryService.getGames('nes');
+
+// Update game metadata
+const game = nesGames[0];
+await libraryService.updateGame(game.id, {
+  title: 'Better Title',
+  metadata: { developer: 'Nintendo' }
+});
+```
+
+## Error handling
+
+Scanning continues even if individual files fail:
+
+```typescript
+try {
+  const games = await libraryService.scanDirectory('/path/to/roms');
+  console.log(`Found ${games.length} games`);
+} catch (error) {
+  // Only fatal directory access errors throw
+  console.error('Scan failed:', error.message);
+}
+
+// Individual file errors are logged but don't throw
+// Check logs for: "Skipping unreadable ROM: <path>"
+```
+
+## Source reference
+
+- Implementation: `apps/desktop/src/main/services/LibraryService.ts:53`
+- Usage example: `apps/desktop/src/main/ipc/handlers.ts:22`

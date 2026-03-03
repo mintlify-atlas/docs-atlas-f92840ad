@@ -1,0 +1,275 @@
+---
+title: Save states
+description: Use save states, quick save, autosave, and SRAM management in GameLord
+---
+
+GameLord provides comprehensive save state management with quick save/load, multiple slots, and automatic SRAM persistence.
+
+## What are save states?
+
+Save states are snapshots of the emulator's entire memory at a specific moment:
+
+- **Instant saves** - Save anywhere, even in games without built-in save systems
+- **Serialized memory** - Captures all RAM, registers, and core state
+- **Slot-based** - Store up to 5 manual saves + 1 autosave per game
+- **Independent of in-game saves** - Save states don't interfere with battery saves (SRAM)
+
+<Note>
+  Save states are stored per-ROM, identified by the game's content hash. Moving or renaming a ROM file won't lose your saves.
+</Note>
+
+## Quick save and load
+
+The fastest way to save/load:
+
+<Steps>
+  <Step title="Quick save">
+    Press `F5` or click the "Save" button in the control overlay.
+  </Step>
+  
+  <Step title="Current slot">
+    The save is written to the currently selected slot (0-4).
+  </Step>
+  
+  <Step title="Quick load">
+    Press `F9` or click the "Load" button to restore that state instantly.
+  </Step>
+</Steps>
+
+<Tip>
+  Quick save/load always use the currently selected slot. Switch slots in the save state menu before pressing F5/F9.
+</Tip>
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `F5` | Save state to current slot |
+| `F9` | Load state from current slot |
+
+<Warning>
+  These shortcuts only work when the game window is focused and you're not typing in an input field.
+</Warning>
+
+## Save state slots
+
+### Slot system
+
+GameLord provides 5 manual save slots per game:
+
+- **Slots 0-4**: Manual saves accessible via quick save/load
+- **Slot 99**: Reserved for autosave (see below)
+
+<AccordionGroup>
+  <Accordion title="Selecting a slot">
+    1. Open the save state menu in the game window overlay
+    2. Click a slot number (0-4) to select it
+    3. The selected slot is highlighted
+    4. Press F5 to save or F9 to load that slot
+  </Accordion>
+  
+  <Accordion title="Overwriting slots">
+    - Saving to an occupied slot overwrites the previous state
+    - No confirmation dialog - saves are instant
+    - Use different slots to maintain multiple save points
+  </Accordion>
+  
+  <Accordion title="Empty slots">
+    - Attempting to load an empty slot does nothing
+    - No error message - the game continues running
+    - Save to a slot first before loading
+  </Accordion>
+</AccordionGroup>
+
+### Slot management UI
+
+The save state menu shows:
+
+- **Slot numbers** (0-4) as clickable buttons
+- **Selected slot** highlighted with accent color
+- **Save/Load buttons** trigger actions on the selected slot
+- **Keyboard hints** (F5/F9) shown on buttons
+
+## Autosave on close
+
+GameLord automatically saves your progress when you close the game window:
+
+<Steps>
+  <Step title="Close initiated">
+    You click the close button or press `Cmd+W`.
+  </Step>
+  
+  <Step title="Emulation paused">
+    The emulation worker stops advancing frames.
+  </Step>
+  
+  <Step title="Autosave created">
+    Current state is serialized and saved to slot 99.
+  </Step>
+  
+  <Step title="SRAM saved">
+    Battery save data is written to disk (if changed).
+  </Step>
+  
+  <Step title="Shutdown animation">
+    Window plays the power-off effect and closes.
+  </Step>
+</Steps>
+
+<Note>
+  Autosave (slot 99) is separate from manual saves (slots 0-4). Loading a manual save doesn't affect the autosave.
+</Note>
+
+### Resume on launch
+
+When launching a game that has an autosave:
+
+1. GameLord checks for slot 99 existence
+2. Displays a resume prompt: "Continue from last session or start fresh?"
+3. **Resume** - Loads autosave state and continues
+4. **Start Fresh** - Launches from the beginning (autosave is preserved)
+
+<Tip>
+  Autosave is persistent across sessions. You can always resume your last session, even days later.
+</Tip>
+
+## SRAM (battery saves)
+
+SRAM represents the game's built-in save system (battery-backed saves):
+
+- **Separate from save states** - SRAM is the "real" in-game save
+- **Automatic persistence** - Synced to disk when you close the game
+- **Per-ROM storage** - Saved to `<userData>/saves/<romName>.srm`
+- **Preserved across sessions** - Works exactly like original hardware
+
+<Note>
+  Save states capture SRAM as part of the full memory snapshot. Loading a save state also restores SRAM to its state at that moment.
+</Note>
+
+### When SRAM is saved
+
+GameLord writes SRAM in two scenarios:
+
+1. **On close** - When you close the game window (part of shutdown sequence)
+2. **Manual request** - Via API call (future feature)
+
+<Warning>
+  If GameLord crashes or is force-quit, SRAM changes since the last save may be lost. The emulation core maintains SRAM in memory but doesn't auto-sync to disk every frame.
+</Warning>
+
+## Save data storage
+
+Your save data is stored in the user data directory:
+
+```
+<userData>/
+├── savestates/
+│   └── <romName>/
+│       ├── slot0.sav
+│       ├── slot1.sav
+│       ├── slot2.sav
+│       ├── slot3.sav
+│       ├── slot4.sav
+│       └── autosave.sav (slot 99)
+└── saves/
+    └── <romName>.srm
+```
+
+- **Save states** - One directory per ROM (named by ROM basename)
+- **SRAM files** - Flat structure, one `.srm` file per ROM
+- **Portable** - Safe to back up, transfer to another machine, or version control
+
+<Tip>
+  `<userData>` location varies by platform:
+  - **macOS**: `~/Library/Application Support/GameLord/`
+  - **Windows**: `%APPDATA%/GameLord/`
+  - **Linux**: `~/.config/GameLord/`
+</Tip>
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Use save states strategically">
+    - Save before difficult sections (boss fights, tricky platforming)
+    - Create multiple saves at key story points
+    - Don't rely on a single slot - use 2-3 for safety
+    - Autosave is great for "pick up where I left off" but not for branching
+  </Accordion>
+  
+  <Accordion title="Combine save states and in-game saves">
+    - Use in-game saves (SRAM) for long-term progress
+    - Use save states for short-term experimentation
+    - In-game saves survive save state loads (unless you load an old state)
+  </Accordion>
+  
+  <Accordion title="Back up your saves">
+    - Save states and SRAM are stored as files on disk
+    - Copy the `savestates/` and `saves/` directories to back up
+    - Restore by copying files back to `<userData>/`
+  </Accordion>
+</AccordionGroup>
+
+## Serialization details
+
+For developers and advanced users:
+
+### Save state format
+
+GameLord uses the libretro core's serialization API:
+
+- `retro_serialize_size()` - Query required buffer size
+- `retro_serialize()` - Serialize core state to buffer
+- `retro_unserialize()` - Deserialize buffer back to core state
+
+**Buffer contents** (core-dependent):
+- CPU registers (PC, SP, A, X, Y, flags, etc.)
+- RAM (work RAM, video RAM, audio RAM)
+- PPU/GPU state (scanline, cycle, registers)
+- APU/SPU state (audio channels, envelopes)
+- Mapper state (bank switching, IRQ counters)
+- SRAM snapshot (at the moment of save)
+
+### SRAM format
+
+SRAM files are raw binary dumps:
+
+- Exact format depends on the game cartridge
+- Typically 8KB-32KB for NES/SNES games
+- Larger for games with battery-backed EEPROM or FRAM
+- Compatible with other emulators (e.g., RetroArch, standalone cores)
+
+<Note>
+  GameLord's `.srm` files are interchangeable with other libretro frontends. You can transfer saves between emulators.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Save state doesn't load">
+    - Verify the slot actually has a saved state (check filesystem)
+    - Ensure you're loading the correct ROM (saves are per-ROM)
+    - Try loading a different slot to rule out corruption
+    - Check logs for serialization errors (Help > Toggle Developer Tools)
+  </Accordion>
+  
+  <Accordion title="In-game save doesn't persist">
+    - SRAM is only written on clean close (not force-quit or crash)
+    - Check that `<userData>/saves/` directory exists and is writable
+    - Verify the core supports SRAM (not all games have battery saves)
+    - Look for `.srm` file creation after closing the game
+  </Accordion>
+  
+  <Accordion title="Autosave not working">
+    - Autosave uses slot 99 (separate from manual slots 0-4)
+    - Check `<userData>/savestates/<romName>/autosave.sav` exists
+    - Autosave is only created on clean close (shutdown sequence)
+    - Force-quitting or crashes skip autosave creation
+  </Accordion>
+  
+  <Accordion title="Lost progress after crash">
+    - Crashes prevent SRAM and autosave writes
+    - Always use manual save states (F5) in addition to in-game saves
+    - Save frequently to multiple slots for redundancy
+    - Consider enabling autosave more frequently (future feature)
+  </Accordion>
+</AccordionGroup>

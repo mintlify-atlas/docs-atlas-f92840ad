@@ -1,0 +1,172 @@
+---
+title: useGamepad
+description: React hook for polling connected gamepads and forwarding button state changes to the emulator via IPC.
+---
+
+## Overview
+
+The `useGamepad` hook polls connected gamepads using the browser Gamepad API and forwards button state changes through the existing `gameInput()` IPC pipeline. It only processes gamepads with `mapping === "standard"` (W3C standard layout) and supports up to 2 players.
+
+## Import
+
+```typescript
+import { useGamepad } from '../hooks/useGamepad'
+```
+
+## Signature
+
+```typescript
+function useGamepad(options: UseGamepadOptions): {
+  connectedCount: number
+}
+```
+
+## Parameters
+
+<ParamField path="options" type="UseGamepadOptions" required>
+  Configuration object for gamepad polling
+  
+  <ParamField path="options.gameInput" type="(port: number, id: number, pressed: boolean) => void" required>
+    Function to send input state to the main process via IPC. Called whenever a button state changes.
+    - `port`: Gamepad index (0 or 1 for up to 2 players)
+    - `id`: Libretro button ID (see LIBRETRO_BUTTON constants)
+    - `pressed`: true when button is pressed, false when released
+  </ParamField>
+  
+  <ParamField path="options.enabled" type="boolean" required>
+    Whether gamepad polling is active. Set false when paused or not in native mode to prevent input processing.
+  </ParamField>
+</ParamField>
+
+## Return value
+
+<ResponseField name="connectedCount" type="number">
+  The number of currently connected gamepads for UI display. Updates automatically when gamepads are connected or disconnected.
+</ResponseField>
+
+## Features
+
+### Standard gamepad mapping
+
+Only processes gamepads with `mapping === "standard"` (W3C standard layout). The gamepad index maps directly to the libretro port (0 or 1, max 2 players).
+
+### Analog stick to d-pad conversion
+
+The left analog stick is automatically converted to digital d-pad input using a deadzone threshold (0.5). This allows using analog sticks for directional input in retro games that expect d-pad controls.
+
+### Button state tracking
+
+Tracks previous button states to detect changes and only sends IPC events when state transitions occur (press or release). This reduces unnecessary IPC traffic.
+
+### Automatic cleanup
+
+Releases all held buttons when a gamepad disconnects or when the hook unmounts, preventing stuck input states.
+
+## Usage example
+
+```typescript GameWindow.tsx
+import { useGamepad } from '../hooks/useGamepad'
+
+export const GameWindow: React.FC = () => {
+  const api = window.gamelord
+  const [mode, setMode] = useState<'overlay' | 'native'>('native')
+  const [isPaused, setIsPaused] = useState(false)
+
+  // Poll connected gamepads and forward input to emulator
+  const { connectedCount: connectedGamepads } = useGamepad({
+    gameInput: api.gameInput,
+    enabled: mode === 'native' && !isPaused,
+  })
+
+  return (
+    <div>
+      {/* Display gamepad connection status */}
+      {connectedGamepads > 0 && (
+        <div className="flex items-center gap-1 text-green-400">
+          <Gamepad2 className="h-4 w-4" />
+          <span>{connectedGamepads} connected</span>
+        </div>
+      )}
+    </div>
+  )
+}
+```
+
+## Button mapping
+
+The hook uses the W3C Standard Gamepad API button mapping, which follows Xbox controller layout:
+
+| Gamepad Button | Libretro ID | Description |
+|----------------|-------------|-------------|
+| buttons[0] | A (8) | Bottom face button (A/Cross) |
+| buttons[1] | B (0) | Right face button (B/Circle) |
+| buttons[2] | X (9) | Left face button (X/Square) |
+| buttons[3] | Y (1) | Top face button (Y/Triangle) |
+| buttons[4] | L (10) | Left bumper |
+| buttons[5] | R (11) | Right bumper |
+| buttons[6] | L2 (12) | Left trigger |
+| buttons[7] | R2 (13) | Right trigger |
+| buttons[8] | SELECT (2) | Select/Back |
+| buttons[9] | START (3) | Start/Forward |
+| buttons[10] | L3 (14) | Left stick press |
+| buttons[11] | R3 (15) | Right stick press |
+| buttons[12] | UP (4) | D-pad up |
+| buttons[13] | DOWN (5) | D-pad down |
+| buttons[14] | LEFT (6) | D-pad left |
+| buttons[15] | RIGHT (7) | D-pad right |
+
+### Analog stick axes
+
+| Axis | Description | D-pad Conversion |
+|------|-------------|------------------|
+| axes[0] | Left stick X | LEFT (< -0.5), RIGHT (> 0.5) |
+| axes[1] | Left stick Y | UP (< -0.5), DOWN (> 0.5) |
+
+<Note>
+  Analog d-pad input is only sent when the corresponding physical d-pad button is not already pressed, preventing conflicts between analog and digital directional input.
+</Note>
+
+## Implementation details
+
+### Polling loop
+
+The hook uses `requestAnimationFrame` to poll gamepad state, ensuring input is checked on every display refresh for minimal latency.
+
+### Event handling
+
+Listens to `gamepadconnected` and `gamepaddisconnected` events to track connection status and automatically release buttons when a gamepad is removed.
+
+### Performance optimization
+
+Uses refs to store callbacks and state, preventing the polling loop from restarting on every re-render. This ensures stable 60+ FPS performance during gameplay.
+
+## Related constants
+
+```typescript
+// Libretro button IDs
+export const LIBRETRO_BUTTON = {
+  B: 0,
+  Y: 1,
+  SELECT: 2,
+  START: 3,
+  UP: 4,
+  DOWN: 5,
+  LEFT: 6,
+  RIGHT: 7,
+  A: 8,
+  X: 9,
+  L: 10,
+  R: 11,
+  L2: 12,
+  R2: 13,
+  L3: 14,
+  R3: 15,
+} as const
+
+// Deadzone threshold for analog to digital conversion
+export const ANALOG_DEADZONE = 0.5
+```
+
+<Tip>
+  This mapping works correctly with 8BitDo SN30 Pro controllers in XInput mode and any controller reporting `mapping: "standard"`.
+</Tip>

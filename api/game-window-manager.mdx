@@ -1,0 +1,507 @@
+---
+title: GameWindowManager
+description: Manages game windows with support for native rendering and RetroArch overlay modes
+---
+
+The `GameWindowManager` class creates and manages game windows in both native mode (single window with canvas rendering) and overlay mode (transparent overlay for external RetroArch process). It handles window animations, state persistence, and IPC communication.
+
+## Constructor
+
+```typescript
+const gameWindowManager = new GameWindowManager(preloadPath);
+```
+
+<ParamField path="preloadPath" type="string" required>
+  Path to the preload script for window security context
+</ParamField>
+
+Automatically sets up IPC handlers for window control (minimize, maximize, close, fullscreen, etc.).
+
+## Native mode windows
+
+### createNativeGameWindow()
+
+Create a game window in native mode — the game renders inside the BrowserWindow via WebGL canvas. Single window, single title bar.
+
+```typescript
+const gameWindow = gameWindowManager.createNativeGameWindow(
+  game,
+  workerClient,
+  avInfo,
+  shouldResume,
+  cardScreenBounds
+);
+```
+
+<ParamField path="game" type="Game" required>
+  Game object from LibraryService
+</ParamField>
+
+<ParamField path="workerClient" type="EmulationWorkerClient" required>
+  Worker client managing the emulation utility process
+</ParamField>
+
+<ParamField path="avInfo" type="AVInfo" required>
+  Audio/video info from the core (base resolution, aspect ratio, sample rate)
+</ParamField>
+
+<ParamField path="shouldResume" type="boolean">
+  Whether to load autosave (slot 99) on boot (default: false)
+</ParamField>
+
+<ParamField path="cardScreenBounds" type="object">
+  Screen-space bounds of the game card for hero transition animation
+  <ParamField path="x" type="number" required>
+    X position
+  </ParamField>
+  <ParamField path="y" type="number" required>
+    Y position
+  </ParamField>
+  <ParamField path="width" type="number" required>
+    Width
+  </ParamField>
+  <ParamField path="height" type="number" required>
+    Height
+  </ParamField>
+</ParamField>
+
+**Returns:** `BrowserWindow`
+
+<Note>
+If `cardScreenBounds` is provided, the window animates from the card position to its final size using a hero transition.
+</Note>
+
+### Window sizing and aspect ratio
+
+Native windows automatically size themselves based on the core's reported aspect ratio:
+
+```typescript
+const baseWidth = avInfo.geometry.baseWidth || 256;
+const baseHeight = avInfo.geometry.baseHeight || 240;
+const aspectRatio = avInfo.geometry.aspectRatio || (baseWidth / baseHeight);
+
+// Size to fill ~80% of display height, minimum 3x base height
+const displayHeight = screen.getPrimaryDisplay().workAreaSize.height;
+const defaultHeight = Math.max(baseHeight * 3, Math.round(displayHeight * 0.8));
+const defaultWidth = Math.round(defaultHeight * aspectRatio);
+```
+
+The window is locked to this aspect ratio, so user resizes maintain correct proportions.
+
+### State persistence
+
+Window position, size, and fullscreen state are saved per-system:
+
+```typescript
+// State files are system-specific to handle different aspect ratios
+const stateFile = `game-window-state-${game.systemId}.json`;
+```
+
+This prevents a wide GBA window size from being restored for a 4:3 NES game.
+
+### Zero-copy frame transfer
+
+Native windows use SharedArrayBuffer for zero-copy video/audio data transfer:
+
+```typescript
+const { port1, port2 } = new MessageChannelMain();
+gameWindow.webContents.postMessage('game:shared-frame-port', null, [port2]);
+
+port1.postMessage({
+  type: 'sharedBuffers',
+  control: sharedBuffers.control,
+  video: sharedBuffers.video,
+  audio: sharedBuffers.audio,
+});
+```
+
+The renderer reads directly from shared memory without IPC overhead.
+
+### Shutdown animation
+
+Native windows implement a graceful shutdown sequence:
+
+1. User clicks close → window intercepts `close` event
+2. Save window state immediately (before animation)
+3. Pause emulation and save SRAM + autosave (slot 99)
+4. Send `game:prepare-close` to renderer
+5. Renderer plays shutdown animation → sends `game-window:ready-to-close`
+6. Main process animates window close (fade + shrink)
+7. Window destroys after animation completes
+
+<Warning>
+A 2-second safety timeout force-closes the window if the renderer doesn't respond.
+</Warning>
+
+## Overlay mode windows (legacy)
+
+### createGameWindow()
+
+Create an overlay game window for external RetroArch process. Transparent frameless window that tracks the RetroArch window position.
+
+```typescript
+const overlayWindow = gameWindowManager.createGameWindow(game);
+```
+
+<ParamField path="game" type="Game" required>
+  Game object from LibraryService
+</ParamField>
+
+**Returns:** `BrowserWindow`
+
+### startTrackingRetroArchWindow()
+
+Start tracking an external RetroArch window to overlay controls.
+
+```typescript
+gameWindowManager.startTrackingRetroArchWindow(game.id, retroArchPid);
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID
+</ParamField>
+
+<ParamField path="pid" type="number" required>
+  RetroArch process ID
+</ParamField>
+
+**Returns:** `void`
+
+Polls every 200ms to:
+- Query RetroArch window bounds via JXA (macOS only)
+- Match overlay window position and size
+- Detect fullscreen mode and adjust title bar offset
+- Show/hide controls based on cursor position
+- Close overlay if RetroArch exits (5 consecutive query failures)
+
+<Note>
+This mode is legacy. New games use native mode (`createNativeGameWindow`) instead.
+</Note>
+
+### stopTracking()
+
+Stop tracking a RetroArch window.
+
+```typescript
+gameWindowManager.stopTracking(game.id);
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID
+</ParamField>
+
+**Returns:** `void`
+
+## Window control
+
+### closeGameWindow()
+
+Close a specific game window.
+
+```typescript
+gameWindowManager.closeGameWindow(game.id);
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID
+</ParamField>
+
+**Returns:** `void`
+
+### closeAllGameWindows()
+
+Close all game windows (e.g., on app quit).
+
+```typescript
+gameWindowManager.closeAllGameWindows();
+```
+
+**Returns:** `void`
+
+### getGameWindow()
+
+Get the BrowserWindow instance for a game.
+
+```typescript
+const window = gameWindowManager.getGameWindow(game.id);
+if (window && !window.isDestroyed()) {
+  window.focus();
+}
+```
+
+<ParamField path="gameId" type="string" required>
+  Game ID
+</ParamField>
+
+**Returns:** `BrowserWindow | undefined`
+
+### destroy()
+
+Clean up all windows and IPC listeners. Called on app quit.
+
+```typescript
+gameWindowManager.destroy();
+```
+
+**Returns:** `void`
+
+## IPC handlers
+
+GameWindowManager automatically sets up these IPC handlers for renderer control:
+
+### game-window:minimize
+
+Minimize the game window.
+
+```typescript
+// Renderer
+ipcRenderer.send('game-window:minimize');
+```
+
+### game-window:maximize
+
+Toggle maximize/unmaximize.
+
+```typescript
+// Renderer
+ipcRenderer.send('game-window:maximize');
+```
+
+### game-window:close
+
+Close the game window (triggers shutdown animation in native mode).
+
+```typescript
+// Renderer
+ipcRenderer.send('game-window:close');
+```
+
+### game-window:toggle-fullscreen
+
+Toggle fullscreen mode.
+
+```typescript
+// Renderer
+ipcRenderer.send('game-window:toggle-fullscreen');
+```
+
+### game-window:set-click-through
+
+Set whether the window should forward mouse events (for overlay mode).
+
+```typescript
+// Renderer
+ipcRenderer.send('game-window:set-click-through', true);
+```
+
+<ParamField path="clickThrough" type="boolean" required>
+  Whether to ignore mouse events
+</ParamField>
+
+### game-window:set-traffic-light-visible
+
+Show/hide macOS traffic light buttons.
+
+```typescript
+// Renderer
+ipcRenderer.send('game-window:set-traffic-light-visible', false);
+```
+
+<ParamField path="visible" type="boolean" required>
+  Whether buttons should be visible
+</ParamField>
+
+### game-window:ready-to-close
+
+Renderer signals that the shutdown animation has completed and the window is ready to destroy.
+
+```typescript
+// Renderer (game window)
+ipcRenderer.send('game-window:ready-to-close');
+```
+
+### game:input
+
+Forward input from renderer to emulation worker.
+
+```typescript
+// Renderer
+ipcRenderer.send('game:input', port, buttonId, pressed);
+```
+
+<ParamField path="port" type="number" required>
+  Controller port (0-3)
+</ParamField>
+
+<ParamField path="id" type="number" required>
+  Button ID (from libretro button constants)
+</ParamField>
+
+<ParamField path="pressed" type="boolean" required>
+  Whether button is pressed or released
+</ParamField>
+
+## Events sent to renderer
+
+Game windows receive these events from the main process:
+
+### game:loaded
+
+Sent when the window finishes loading with the game data.
+
+```typescript
+// Renderer
+ipcRenderer.on('game:loaded', (event, game: Game) => {
+  console.log(`Loaded: ${game.title}`);
+});
+```
+
+### game:mode
+
+Sent to indicate the window mode.
+
+```typescript
+// Renderer
+ipcRenderer.on('game:mode', (event, mode: 'native' | 'overlay') => {
+  if (mode === 'native') {
+    // Set up canvas renderer
+  }
+});
+```
+
+### game:av-info
+
+Sent with audio/video info from the core (native mode only).
+
+```typescript
+// Renderer
+ipcRenderer.on('game:av-info', (event, avInfo: AVInfo) => {
+  console.log(`Resolution: ${avInfo.geometry.baseWidth}x${avInfo.geometry.baseHeight}`);
+  console.log(`Aspect ratio: ${avInfo.geometry.aspectRatio}`);
+});
+```
+
+### game:ready-for-boot
+
+Sent when the window is ready to start the boot animation (after hero transition completes).
+
+```typescript
+// Renderer
+ipcRenderer.on('game:ready-for-boot', () => {
+  // Start CRT power-on animation
+});
+```
+
+### game:prepare-close
+
+Sent when the user closes the window, before the shutdown animation.
+
+```typescript
+// Renderer
+ipcRenderer.on('game:prepare-close', () => {
+  // Play shutdown animation, then send 'game-window:ready-to-close'
+});
+```
+
+### game:video-frame
+
+Fallback video frame delivery when SharedArrayBuffer is not available.
+
+```typescript
+// Renderer
+ipcRenderer.on('game:video-frame', (event, frame: { data: Buffer; width: number; height: number }) => {
+  // Draw frame to canvas
+});
+```
+
+### game:audio-samples
+
+Audio samples from the worker.
+
+```typescript
+// Renderer
+ipcRenderer.on('game:audio-samples', (event, audio: { samples: Buffer; sampleRate: number }) => {
+  // Queue audio samples
+});
+```
+
+### game:emulation-error
+
+Fatal emulation error.
+
+```typescript
+// Renderer
+ipcRenderer.on('game:emulation-error', (event, error: { message: string }) => {
+  console.error('Emulation error:', error.message);
+});
+```
+
+### overlay:show-controls
+
+Show/hide overlay controls based on cursor position (overlay mode only).
+
+```typescript
+// Renderer
+ipcRenderer.on('overlay:show-controls', (event, visible: boolean) => {
+  // Fade controls in/out
+});
+```
+
+## Usage example
+
+```typescript
+import { GameWindowManager } from './GameWindowManager';
+import { EmulationWorkerClient } from './emulator/EmulationWorkerClient';
+
+const gameWindowManager = new GameWindowManager(preloadPath);
+
+// Launch a game in native mode
+const workerClient = new EmulationWorkerClient();
+const avInfo = await workerClient.init({
+  corePath: '/path/to/core.dylib',
+  romPath: '/path/to/game.nes',
+  systemDir: systemDir,
+  saveDir: saveDir,
+  sramDir: sramDir,
+  saveStatesDir: saveStatesDir,
+  addonPath: addonPath,
+});
+
+const gameWindow = gameWindowManager.createNativeGameWindow(
+  game,
+  workerClient,
+  avInfo,
+  false, // don't resume from autosave
+  { x: 100, y: 100, width: 200, height: 300 } // card bounds for hero transition
+);
+
+// Window automatically handles:
+// - Aspect ratio locking
+// - State persistence
+// - Frame/audio forwarding
+// - Shutdown animation
+// - Autosave on close
+
+// Later: close the window
+gameWindowManager.closeGameWindow(game.id);
+
+// On app quit: clean up
+gameWindowManager.destroy();
+```
+
+## Performance considerations
+
+See the [Architecture guide](/developer/architecture) for performance considerations and restrictions on game window rendering:
+
+- No `backdrop-filter` or `backdrop-blur` overlays
+- No expensive CSS effects during gameplay
+- Frame delivery synced to `requestAnimationFrame`
+
+<Warning>
+Violating these rules can cause frame drops and inconsistent frame pacing on high-refresh displays.
+</Warning>
+
+## Source reference
+
+- Implementation: `apps/desktop/src/main/GameWindowManager.ts:23`
+- Usage example: `apps/desktop/src/main/ipc/handlers.ts:24`

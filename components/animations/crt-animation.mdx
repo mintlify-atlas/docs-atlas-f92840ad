@@ -1,0 +1,259 @@
+---
+title: CRTAnimation
+description: Authentic CRT television power on/off animation that simulates tube warmup and shutdown effects
+---
+
+## Overview
+
+The `CRTAnimation` component renders an authentic CRT (cathode ray tube) television power on/off animation. It recreates the distinctive visual characteristics of vintage tube TVs, including:
+
+- **Power-on**: A bright horizontal line expanding from the center, screen filling with scanlines and phosphor glow, brief static flicker, then fading to reveal the game
+- **Power-off**: Screen collapsing to a horizontal line, line shrinking to a glowing dot at the center, dot fading to black
+
+This animation is designed to evoke nostalgia and authenticity when playing games from systems that originally output to CRT displays (NES, SNES, Genesis, PlayStation, arcade cabinets, etc.).
+
+## Props
+
+<ParamField path="direction" type="'on' | 'off'" required>
+  Whether this is a power-on or power-off animation.
+  
+  - `'on'`: Simulates CRT tube warming up with horizontal line expansion, phosphor glow, scanlines, and static
+  - `'off'`: Simulates CRT shutdown with screen collapse, line shrink, and glowing dot fade-out
+</ParamField>
+
+<ParamField path="onComplete" type="() => void" required>
+  Callback function invoked when the animation sequence completes. Use this to transition to the next state, such as revealing the game canvas after power-on or closing the window after power-off.
+  
+  The callback fires after all animation phases complete, ensuring visual continuity before state changes.
+</ParamField>
+
+<ParamField path="duration" type="number">
+  Total duration of the animation in milliseconds. Internally divided into phases with precise timing ratios.
+  
+  **Default values:**
+  - Power-on: `800ms` (tuned for authentic tube warmup feel)
+  - Power-off: `500ms` (faster shutdown matches real CRT behavior)
+  
+  Only override this if you need synchronized timing with other animations or specific duration requirements.
+</ParamField>
+
+## Visual effects
+
+### Power-on sequence
+
+The power-on animation consists of four phases:
+
+1. **Line phase** (15% of duration): A bright horizontal line with white and blue glow appears at the center and expands to 80% width
+2. **Expand phase** (35% of duration): The line expands vertically to fill the entire screen, maintaining phosphor glow and scanlines
+3. **Static phase** (25% of duration): Full screen with animated static noise overlay, simulating tube stabilization
+4. **Fade phase** (25% of duration): Black background fades out to reveal the game canvas below
+
+<Note>
+The animation uses CSS keyframe animations for smooth, GPU-accelerated performance. Phosphor glow is rendered with radial gradients, and scanlines use repeating linear gradients.
+</Note>
+
+### Power-off sequence
+
+The power-off animation consists of four phases:
+
+1. **Shrink phase** (35% of duration): Full screen collapses vertically to a horizontal line with intensified phosphor glow
+2. **Line phase** (25% of duration): Horizontal line contracts toward the center with blue-tinted glow
+3. **Dot phase** (20% of duration): Line becomes a small glowing dot (6px) that pulses and fades
+4. **Black phase** (20% of duration): Final black screen held until `onComplete` fires
+
+<Tip>
+The power-off animation deliberately keeps the black background opaque until completion to prevent the game canvas from flashing through during OS-level window fade transitions.
+</Tip>
+
+## Usage
+
+<CodeGroup>
+```tsx Basic power-on
+import { CRTAnimation } from './animations'
+
+function GameLauncher() {
+  const [showAnimation, setShowAnimation] = useState(true)
+
+  const handleAnimationComplete = () => {
+    setShowAnimation(false)
+    // Reveal game canvas, start emulation
+  }
+
+  return (
+    <div className="game-container">
+      {showAnimation && (
+        <CRTAnimation
+          direction="on"
+          onComplete={handleAnimationComplete}
+        />
+      )}
+      <canvas id="game" />
+    </div>
+  )
+}
+```
+
+```tsx Power-off animation
+import { CRTAnimation } from './animations'
+
+function GameWindow() {
+  const [isPoweringOff, setIsPoweringOff] = useState(false)
+
+  const handleShutdown = () => {
+    // Pause emulation, trigger shutdown animation
+    setIsPoweringOff(true)
+  }
+
+  const handlePowerOffComplete = () => {
+    // Close window or return to library
+    window.close()
+  }
+
+  return (
+    <>
+      <GameCanvas />
+      
+      {isPoweringOff && (
+        <CRTAnimation
+          direction="off"
+          onComplete={handlePowerOffComplete}
+        />
+      )}
+    </>
+  )
+}
+```
+
+```tsx Custom duration
+import { CRTAnimation } from './animations'
+
+// Faster power-on for quick launches
+function QuickLauncher() {
+  return (
+    <CRTAnimation
+      direction="on"
+      duration={400} // Half the default duration
+      onComplete={() => console.log('Ready!')}
+    />
+  )
+}
+```
+
+```tsx Conditional rendering
+import { CRTAnimation } from './animations'
+import { getDisplayType } from '../types/displayType'
+
+function SystemSpecificAnimation({ systemId }: { systemId: string }) {
+  const displayType = getDisplayType(systemId)
+  const [isPoweringOn, setIsPoweringOn] = useState(true)
+
+  // Only use CRT animation for systems that output to CRT displays
+  if (displayType !== 'crt') {
+    return <OtherAnimation />
+  }
+
+  return (
+    <CRTAnimation
+      direction="on"
+      onComplete={() => setIsPoweringOn(false)}
+    />
+  )
+}
+```
+</CodeGroup>
+
+## Implementation details
+
+### Rendering structure
+
+The animation is rendered as an absolutely positioned overlay with `z-index: 100` and `pointer-events: none`, ensuring it doesn't interfere with user interaction while maintaining visual priority.
+
+```tsx
+<div className="absolute inset-0 z-[100] pointer-events-none overflow-hidden">
+  {/* Black background */}
+  {/* Horizontal line */}
+  {/* Expanding screen with phosphor glow */}
+  {/* Scanlines */}
+  {/* Static noise */}
+</div>
+```
+
+### Phosphor glow effect
+
+The characteristic blue-tinted glow of CRT phosphor is created with radial gradients:
+
+```tsx
+<div
+  style={{
+    background: 'radial-gradient(ellipse at center, rgba(100, 200, 255, 0.15) 0%, transparent 70%)'
+  }}
+/>
+```
+
+### Scanlines
+
+CRT scanlines are rendered with repeating linear gradients for authentic horizontal line patterns:
+
+```tsx
+<div
+  style={{
+    backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0, 0, 0, 0.3) 1px, rgba(0, 0, 0, 0.3) 2px)',
+    backgroundSize: '100% 4px'
+  }}
+/>
+```
+
+### Static noise
+
+The static effect uses SVG fractal noise filtered through feTurbulence, animated with random transforms:
+
+```tsx
+<div
+  className="animate-crt-static"
+  style={{
+    backgroundImage: `url("data:image/svg+xml,...")`,
+    opacity: 0.15
+  }}
+/>
+```
+
+<Note>
+The animation uses `useEffect` with proper cleanup to manage phase transitions via `setTimeout`. All timers are cleared on unmount to prevent memory leaks.
+</Note>
+
+## Performance considerations
+
+### Frame rate impact
+
+The CRT animation is designed to have **zero impact on emulation frame pacing** because:
+
+1. It only renders during pause states (launch/shutdown) when the emulation loop is inactive
+2. CSS animations are GPU-accelerated and don't compete with WebGL rendering
+3. The animation removes itself from the DOM (`return null`) after completion
+
+<Warning>
+Per GameLord's performance guidelines, expensive effects like `backdrop-filter` and multi-pass shaders are **never** used during active gameplay. CRT animations are exempt from these restrictions because they only play when emulation is paused.
+</Warning>
+
+### Optimization tips
+
+- The animation automatically unmounts after calling `onComplete`, freeing GPU resources
+- Scanlines use static gradients (no animation) for minimal compositing cost
+- Static noise is kept at low opacity (15%) to reduce pixel fill requirements
+- Box shadows on the horizontal line use GPU-accelerated filters
+
+## When to use
+
+Use `CRTAnimation` for:
+
+- **Home console games**: NES, SNES, Genesis, N64, PlayStation, Saturn, Dreamcast
+- **Arcade games**: Any arcade cabinet that output to CRT monitors
+- **Systems from the CRT era**: Any game system designed to connect to tube televisions
+
+For portable systems with LCD screens, use `LCDHandheldAnimation` or `LCDPortableAnimation` instead. For automatic selection based on system type, use the `PowerAnimation` factory component.
+
+## Related components
+
+- [PowerAnimation](/components/animations/power-animation) - Factory component that auto-selects animation type
+- `LCDHandheldAnimation` - For Game Boy, GBA, DS
+- `LCDPortableAnimation` - For PSP and modern portables

@@ -1,0 +1,541 @@
+---
+title: Testing
+description: Test suite, running tests, writing new tests, and debugging failures
+---
+
+GameLord uses [Vitest](https://vitest.dev/) for unit and integration testing. The test suite covers IPC handlers, library services, emulation logic, and UI components.
+
+## Running tests
+
+### Run all tests
+
+```bash
+# From root directory
+pnpm test
+
+# Or use Turbo
+pnpm turbo test
+```
+
+This runs tests across all workspaces (`apps/desktop` and `packages/ui`).
+
+### Run tests in watch mode
+
+```bash
+cd apps/desktop
+pnpm test:watch
+```
+
+Tests re-run automatically when files change.
+
+### Run specific test files
+
+```bash
+# Run a single test file
+pnpm vitest run src/main/services/LibraryService.test.ts
+
+# Run tests matching a pattern
+pnpm vitest run --grep "LibraryService"
+```
+
+### Run with coverage
+
+```bash
+pnpm vitest run --coverage
+```
+
+Coverage report is generated in `coverage/` directory.
+
+<Info>
+Coverage thresholds are not enforced yet. Focus on testing critical paths: IPC handlers, state management, and native addon interactions.
+</Info>
+
+## Test configuration
+
+Vitest is configured in `vitest.config.ts`:
+
+```typescript
+import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'happy-dom',  // Lightweight DOM environment
+    globals: true,             // No need to import describe, it, expect
+    include: ['src/**/*.test.{ts,tsx}'],
+    exclude: ['**/node_modules/**'],
+  },
+})
+```
+
+<Note>
+We use `happy-dom` instead of `jsdom` for faster test execution. It provides sufficient DOM APIs for most React component tests.
+</Note>
+
+## Test structure
+
+Tests are co-located with source files:
+
+```
+apps/desktop/src/
+├── main/
+│   ├── services/
+│   │   ├── LibraryService.ts
+│   │   ├── LibraryService.test.ts       # Unit tests
+│   │   ├── ArtworkService.ts
+│   │   └── ArtworkService.test.ts
+│   ├── emulator/
+│   │   ├── EmulatorManager.ts
+│   │   ├── EmulatorManager.test.ts
+│   │   ├── LibretroNativeCore.ts
+│   │   └── LibretroNativeCore.test.ts
+│   └── ipc/
+│       ├── handlers.ts
+│       └── handlers.test.ts              # IPC handler tests
+└── renderer/
+    ├── hooks/
+    │   ├── useGamepad.ts
+    │   └── useGamepad.test.ts
+    └── components/
+        ├── GameWindow.tsx
+        └── GameWindow.test.tsx            # React component tests
+```
+
+## Writing tests
+
+### Basic structure
+
+```typescript
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+describe('LibraryService', () => {
+  let service: LibraryService
+
+  beforeEach(() => {
+    // Setup: create fresh instance
+    service = new LibraryService()
+  })
+
+  afterEach(() => {
+    // Cleanup: clear mocks, close connections
+    vi.clearAllMocks()
+  })
+
+  it('should scan directory and find ROMs', async () => {
+    // Arrange
+    const romDir = '/path/to/test/roms'
+    
+    // Act
+    const games = await service.scanDirectory(romDir)
+    
+    // Assert
+    expect(games).toHaveLength(10)
+    expect(games[0].systemId).toBe('nes')
+  })
+})
+```
+
+### Mocking Electron APIs
+
+<CodeGroup>
+```typescript Mocking app.getPath
+import { vi } from 'vitest'
+
+// Mock electron module
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn((name: string) => {
+      if (name === 'userData') return '/tmp/test-user-data'
+      if (name === 'home') return '/tmp/test-home'
+      return '/tmp'
+    }),
+  },
+  ipcMain: {
+    handle: vi.fn(),
+    on: vi.fn(),
+  },
+}))
+```
+
+```typescript Mocking IPC
+import { vi } from 'vitest'
+import type { IpcMainInvokeEvent } from 'electron'
+
+const mockEvent: IpcMainInvokeEvent = {
+  sender: {
+    send: vi.fn(),
+  },
+} as any
+
+ipcMain.handle('library:getGames', async (event) => {
+  return libraryService.getGames()
+})
+```
+</CodeGroup>
+
+### Mocking the native addon
+
+The native addon can't be loaded in tests, so mock it:
+
+```typescript
+import { vi } from 'vitest'
+
+vi.mock('../native/gamelord_libretro.node', () => ({
+  LibretroCore: vi.fn().mockImplementation(() => ({
+    loadCore: vi.fn().mockReturnValue(true),
+    loadGame: vi.fn().mockReturnValue(true),
+    run: vi.fn(),
+    getVideoFrame: vi.fn().mockReturnValue({
+      data: new Uint8Array(256 * 240 * 4),
+      width: 256,
+      height: 240,
+    }),
+    getAudioBuffer: vi.fn().mockReturnValue(new Int16Array(1024)),
+    serializeState: vi.fn().mockReturnValue(new Uint8Array(1024)),
+    unserializeState: vi.fn().mockReturnValue(true),
+    getMemoryData: vi.fn().mockReturnValue(new Uint8Array(8192)),
+  })),
+}))
+```
+
+### Testing async operations
+
+```typescript
+it('should download core from buildbot', async () => {
+  const downloader = new CoreDownloader()
+  
+  // Mock https.get
+  vi.mock('https', () => ({
+    get: vi.fn((url, callback) => {
+      callback({
+        pipe: vi.fn(),
+        on: vi.fn(),
+      })
+      return { on: vi.fn() }
+    }),
+  }))
+  
+  await expect(downloader.downloadCore('fceumm_libretro', 'nes'))
+    .resolves
+    .toContain('/cores/fceumm_libretro.dylib')
+})
+```
+
+### Testing React components
+
+```typescript
+import { render, screen, fireEvent } from '@testing-library/react'
+import { GameCard } from './GameCard'
+
+it('should render game title and cover art', () => {
+  const game = {
+    id: '1',
+    title: 'Super Mario Bros.',
+    systemId: 'nes',
+    coverArt: 'artwork://123',
+  }
+  
+  render(<GameCard game={game} />)
+  
+  expect(screen.getByText('Super Mario Bros.')).toBeInTheDocument()
+  expect(screen.getByRole('img')).toHaveAttribute('src', 'artwork://123')
+})
+
+it('should emit play event on click', () => {
+  const onPlay = vi.fn()
+  const game = { id: '1', title: 'Game', systemId: 'nes' }
+  
+  render(<GameCard game={game} onPlay={onPlay} />)
+  
+  fireEvent.click(screen.getByRole('button', { name: /play/i }))
+  
+  expect(onPlay).toHaveBeenCalledWith(game)
+})
+```
+
+### Testing custom hooks
+
+```typescript
+import { renderHook, act } from '@testing-library/react'
+import { useGamepad } from './useGamepad'
+
+it('should detect gamepad connection', () => {
+  const { result } = renderHook(() => useGamepad())
+  
+  expect(result.current.connected).toBe(false)
+  
+  act(() => {
+    // Simulate gamepad connection
+    window.dispatchEvent(new Event('gamepadconnected'))
+  })
+  
+  expect(result.current.connected).toBe(true)
+})
+```
+
+## Test coverage
+
+### Current coverage
+
+<CardGroup cols={2}>
+  <Card title="IPC handlers" icon="check">
+    ✅ Fully covered
+  </Card>
+  <Card title="LibraryService" icon="check">
+    ✅ Scanning, hashing, deduplication
+  </Card>
+  <Card title="LibretroNativeCore" icon="check">
+    ✅ Save states, SRAM, error recovery
+  </Card>
+  <Card title="EmulationWorkerClient" icon="check">
+    ✅ Worker lifecycle, IPC protocol
+  </Card>
+  <Card title="WebGL shaders" icon="check">
+    ✅ Shader compilation, fallback behavior
+  </Card>
+  <Card title="ArtworkService" icon="triangle-exclamation">
+    ⚠️ Partial - API mocking needs work
+  </Card>
+  <Card title="GameWindow component" icon="xmark">
+    ❌ Missing - needs integration testing
+  </Card>
+  <Card title="Native addon" icon="xmark">
+    ❌ Not testable - C++ code requires manual testing
+  </Card>
+</CardGroup>
+
+### Priority areas for new tests
+
+<Steps>
+  <Step title="GameWindow integration">
+    Test the full frame rendering pipeline: IPC event → buffer → WebGL draw → canvas.
+  </Step>
+  
+  <Step title="Audio playback">
+    Test Web Audio API integration: sample buffering, scheduling, underrun handling.
+  </Step>
+  
+  <Step title="Input mapping">
+    Test keyboard/gamepad input → IPC → worker → native addon state updates.
+  </Step>
+  
+  <Step title="Error boundaries">
+    Test React error boundaries catch renderer crashes gracefully.
+  </Step>
+</Steps>
+
+## Manual testing
+
+### Testing the native addon
+
+The native addon requires manual testing with real cores and ROMs:
+
+<Steps>
+  <Step title="Build the addon">
+    ```bash
+    cd apps/desktop/native
+    npx node-gyp rebuild
+    ```
+  </Step>
+  
+  <Step title="Run the app">
+    ```bash
+    cd ../..
+    pnpm start
+    ```
+  </Step>
+  
+  <Step title="Test core loading">
+    - Open the library
+    - Add a ROM directory
+    - Launch a game
+    - Verify the game runs without crashes
+  </Step>
+  
+  <Step title="Test save states">
+    - Press F5 to save state (slot 1)
+    - Play for a bit
+    - Press F9 to load state
+    - Verify game restored to save point
+  </Step>
+  
+  <Step title="Test SRAM persistence">
+    - Play a game with battery saves (e.g., Pokémon)
+    - Save in-game
+    - Close the game
+    - Relaunch the game
+    - Verify save is preserved
+  </Step>
+  
+  <Step title="Check logs for errors">
+    ```bash
+    tail -f ~/Library/Logs/GameLord/main.log
+    ```
+  </Step>
+</Steps>
+
+### Testing frame pacing
+
+Use the FPS counter to verify smooth frame delivery:
+
+1. Enable FPS counter in Settings (or press Cmd+Shift+F)
+2. Launch a game
+3. Monitor FPS - should be stable at ~60 (±1)
+4. Check for stuttering during gameplay
+
+<Info>
+On 120Hz displays, the renderer will draw at 120Hz but the core still runs at 60Hz. The FPS counter shows renderer FPS, not emulation FPS.
+</Info>
+
+### Performance profiling
+
+<CodeGroup>
+```bash Chrome DevTools (Renderer)
+# Launch with remote debugging
+pnpm start
+
+# Open chrome://inspect in Chrome/Edge
+# Click "inspect" on the renderer target
+# Go to Performance tab → Record
+```
+
+```bash Node.js profiler (Main)
+# Launch with profiling
+node --inspect-brk ./out/main/index.js
+
+# Open chrome://inspect
+# Attach to main process
+# Go to Profiler tab → Start
+```
+</CodeGroup>
+
+## Debugging test failures
+
+### View test output
+
+```bash
+# Run with verbose output
+pnpm vitest run --reporter=verbose
+
+# Run a single failing test
+pnpm vitest run --reporter=verbose src/path/to/test.test.ts
+```
+
+### Debug in VS Code
+
+Add a launch configuration in `.vscode/launch.json`:
+
+```json
+{
+  "type": "node",
+  "request": "launch",
+  "name": "Debug Vitest Tests",
+  "runtimeExecutable": "pnpm",
+  "runtimeArgs": ["vitest", "run", "--no-coverage"],
+  "cwd": "${workspaceFolder}/apps/desktop",
+  "console": "integratedTerminal",
+  "internalConsoleOptions": "neverOpen"
+}
+```
+
+Set breakpoints in test files and press F5.
+
+### Common failure patterns
+
+<Accordion title="Test times out">
+  Likely waiting for an async operation that never resolves:
+  
+  ```typescript
+  // Bad: Promise never resolves
+  await service.someAsyncMethod()
+  
+  // Good: Add timeout
+  await service.someAsyncMethod().timeout(5000)
+  
+  // Or mock the async dep
+  vi.mock('./someModule', () => ({
+    someAsyncMethod: vi.fn().mockResolvedValue(result),
+  }))
+  ```
+</Accordion>
+
+<Accordion title="'Cannot read property X of undefined'">
+  Mock is missing properties:
+  
+  ```typescript
+  // Bad: Incomplete mock
+  const mockCore = { loadCore: vi.fn() }
+  
+  // Good: Mock all used properties
+  const mockCore = {
+    loadCore: vi.fn().mockReturnValue(true),
+    loadGame: vi.fn().mockReturnValue(true),
+    run: vi.fn(),
+    // ... all methods used in the test
+  }
+  ```
+</Accordion>
+
+<Accordion title="'Module not found' in test">
+  Path resolution differs in tests. Use absolute paths or configure Vitest aliases:
+  
+  ```typescript
+  // vitest.config.ts
+  export default defineConfig({
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
+  })
+  ```
+</Accordion>
+
+## CI/CD testing
+
+GitHub Actions runs tests on every PR:
+
+```yaml
+- name: Run tests
+  run: pnpm turbo test
+
+- name: Upload coverage
+  uses: codecov/codecov-action@v3
+  with:
+    files: ./coverage/coverage-final.json
+```
+
+Tests must pass before merging.
+
+## Testing guidelines
+
+<CardGroup cols={2}>
+  <Card title="Test behavior, not implementation" icon="lightbulb">
+    Focus on inputs and outputs, not internal details. This makes tests resilient to refactoring.
+  </Card>
+  
+  <Card title="One assertion per test" icon="check">
+    Each test should verify one behavior. Multiple tests with clear names are better than one test with many assertions.
+  </Card>
+  
+  <Card title="Use descriptive test names" icon="quote-right">
+    `should emit scanProgress event for each discovered game` is better than `test scan`.
+  </Card>
+  
+  <Card title="Mock external dependencies" icon="plug">
+    Tests should be fast and deterministic. Mock filesystem, network, and native addon.
+  </Card>
+</CardGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/developer/architecture">
+    Understand the system design to write better integration tests
+  </Card>
+  
+  <Card title="Building" icon="hammer" href="/developer/building">
+    Build and package GameLord for distribution
+  </Card>
+</CardGroup>

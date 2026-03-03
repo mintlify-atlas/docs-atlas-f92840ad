@@ -1,0 +1,421 @@
+---
+title: Building
+description: Build GameLord from source with step-by-step instructions for all platforms
+---
+
+GameLord uses a modern build toolchain with pnpm workspaces, Turborepo, and electron-vite. The project includes a native Node addon that requires additional build tools.
+
+## Prerequisites
+
+<CardGroup cols={3}>
+  <Card title="Node.js" icon="node-js">
+    Version 18 or later
+  </Card>
+  <Card title="pnpm" icon="box">
+    Version 8 or later
+  </Card>
+  <Card title="C++ toolchain" icon="screwdriver-wrench">
+    Platform-specific (see below)
+  </Card>
+</CardGroup>
+
+### macOS
+
+```bash
+# Install Xcode Command Line Tools
+xcode-select --install
+
+# Install Node.js and pnpm via Homebrew
+brew install node pnpm
+```
+
+<Note>
+macOS 11+ (Big Sur) is required for development. The native addon targets `MACOSX_DEPLOYMENT_TARGET=10.15`.
+</Note>
+
+### Linux
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install build-essential python3 libasound2-dev
+
+# Fedora
+sudo dnf install gcc-c++ make python3 alsa-lib-devel
+
+# Install Node.js and pnpm
+curl -fsSL https://get.pnpm.io/install.sh | sh -
+```
+
+### Windows
+
+<Steps>
+  <Step title="Install Visual Studio Build Tools">
+    Download [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/) and install the "Desktop development with C++" workload.
+  </Step>
+  
+  <Step title="Install Node.js">
+    Download from [nodejs.org](https://nodejs.org/) or use a version manager like [nvm-windows](https://github.com/coreybutler/nvm-windows).
+  </Step>
+  
+  <Step title="Install pnpm">
+    ```bash
+    npm install -g pnpm
+    ```
+  </Step>
+</Steps>
+
+## Clone and install
+
+```bash
+# Clone the repository
+git clone https://github.com/ryanmagoon/gamelord.git
+cd gamelord
+
+# Install dependencies
+pnpm install
+```
+
+<Info>
+pnpm uses workspaces to manage the monorepo structure (`apps/desktop` and `packages/ui`). All dependencies are hoisted to the root `node_modules`.
+</Info>
+
+## Build the native addon
+
+The native addon must be built before running or packaging the app:
+
+```bash
+cd apps/desktop/native
+npx node-gyp rebuild
+```
+
+<Warning>
+The bundled `node-gyp` (v5.0.6) is incompatible with Node 24+. Always use `npx node-gyp` (v10+) instead of `npm run build:native`.
+</Warning>
+
+### Build configuration
+
+The addon build is configured via `binding.gyp`:
+
+<CodeGroup>
+```json binding.gyp
+{
+  "targets": [
+    {
+      "target_name": "gamelord_libretro",
+      "sources": [
+        "src/addon.cc",
+        "src/libretro_core.cc"
+      ],
+      "include_dirs": [
+        "<!@(node -p \"require('node-addon-api').include\")",
+        "src"
+      ],
+      "defines": [
+        "NAPI_DISABLE_CPP_EXCEPTIONS"
+      ],
+      "conditions": [
+        ["OS=='mac'", {
+          "xcode_settings": {
+            "GCC_ENABLE_CPP_EXCEPTIONS": "YES",
+            "CLANG_CXX_LIBRARY": "libc++",
+            "MACOSX_DEPLOYMENT_TARGET": "10.15",
+            "OTHER_CPLUSPLUSFLAGS": ["-std=c++17"]
+          },
+          "libraries": [
+            "-framework CoreAudio",
+            "-framework AudioToolbox"
+          ]
+        }]
+      ]
+    }
+  ]
+}
+```
+
+```cpp src/addon.cc
+#include <napi.h>
+#include "libretro_core.h"
+
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  return LibretroCore::Init(env, exports);
+}
+
+NODE_API_MODULE(gamelord_libretro, Init)
+```
+</CodeGroup>
+
+### Troubleshooting addon build
+
+<Accordion title="Error: 'node-gyp' is not recognized">
+  Ensure you're using `npx node-gyp` instead of relying on npm scripts:
+  
+  ```bash
+  cd apps/desktop/native
+  npx node-gyp rebuild
+  ```
+</Accordion>
+
+<Accordion title="Error: Python not found">
+  node-gyp requires Python 3.6+:
+  
+  ```bash
+  # macOS/Linux
+  python3 --version
+  
+  # Windows - ensure Python is in PATH
+  npm config set python /path/to/python3
+  ```
+</Accordion>
+
+<Accordion title="Error: MSBuild not found (Windows)">
+  Install Visual Studio Build Tools with the "Desktop development with C++" workload. If already installed, ensure MSBuild is in PATH:
+  
+  ```bash
+  npm config set msbuild_path "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
+  ```
+</Accordion>
+
+## Development builds
+
+### Run in development mode
+
+```bash
+# From root directory
+pnpm start
+
+# Or use Turbo directly
+pnpm turbo dev
+```
+
+This starts:
+- **electron-vite dev server** for hot-reload
+- **Main process** with source maps
+- **Renderer process** with React Fast Refresh
+- **Worker process** compiled on-demand
+
+<Info>
+The dev server runs at `http://localhost:5173` for the renderer. The main process and workers are rebuilt automatically on file changes.
+</Info>
+
+### Preview production build
+
+```bash
+pnpm turbo build
+pnpm turbo start
+```
+
+This builds optimized bundles and runs the app without the dev server.
+
+## Production builds
+
+### Build configuration
+
+Electron build is configured via `electron.vite.config.ts`:
+
+<CodeGroup>
+```typescript electron.vite.config.ts
+export default defineConfig({
+  main: {
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/main.ts'),
+          'workers/core-worker': resolve(__dirname, 'src/main/workers/core-worker.ts'),
+        },
+        external: [/\.node$/], // Exclude native addons from bundle
+      },
+    },
+  },
+  preload: {
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/preload.ts'),
+        },
+      },
+    },
+  },
+  renderer: {
+    server: {
+      headers: {
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp', // Required for SharedArrayBuffer
+      },
+    },
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'index.html'),
+          'game-window': resolve(__dirname, 'game-window.html'),
+        },
+      },
+    },
+    plugins: [react()],
+  },
+});
+```
+</CodeGroup>
+
+### Package for distribution
+
+```bash
+# Build native addon + Electron app
+cd apps/desktop
+pnpm run build
+
+# Create distributable (DMG for macOS, AppImage/deb for Linux, exe/msi for Windows)
+pnpm run make
+```
+
+Output directory: `apps/desktop/out/make/`
+
+<Note>
+Packaging for distribution requires additional setup for code signing and notarization. See the Configuration guide for platform-specific requirements.
+</Note>
+
+## Platform-specific packaging
+
+### macOS (DMG)
+
+<Steps>
+  <Step title="Configure code signing">
+    Set up Apple Developer credentials in `.env`:
+    
+    ```bash
+    APPLE_DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
+    APPLE_ID="your-apple-id@example.com"
+    APPLE_ID_PASSWORD="app-specific-password"
+    APPLE_TEAM_ID="TEAMID"
+    ```
+  </Step>
+  
+  <Step title="Build and sign">
+    ```bash
+    pnpm run make
+    ```
+    
+    Electron-builder will automatically sign the app and create a DMG.
+  </Step>
+  
+  <Step title="Notarize (for distribution)">
+    ```bash
+    pnpm run publish
+    ```
+    
+    This uploads the app to Apple for notarization and staples the ticket.
+  </Step>
+</Steps>
+
+<Warning>
+Notarization can take 5-30 minutes. Check status at [developer.apple.com](https://developer.apple.com/account).
+</Warning>
+
+### Linux (AppImage/deb)
+
+```bash
+# AppImage (universal)
+pnpm run make -- --linux AppImage
+
+# Debian package
+pnpm run make -- --linux deb
+
+# Both
+pnpm run make -- --linux
+```
+
+### Windows (NSIS/MSI)
+
+```bash
+# NSIS installer (recommended)
+pnpm run make -- --win nsis
+
+# MSI installer
+pnpm run make -- --win msi
+
+# Both
+pnpm run make -- --win
+```
+
+<Info>
+Windows builds should be code-signed with an EV certificate for SmartScreen reputation. See electron-builder docs for signing configuration.
+</Info>
+
+## Turbo caching
+
+Turborepo caches build outputs to speed up subsequent builds:
+
+```bash
+# Clear Turbo cache
+pnpm turbo clean
+
+# Force rebuild without cache
+pnpm turbo build --force
+```
+
+Cache location: `.turbo/cache/`
+
+## CI/CD
+
+The project includes a GitHub Actions workflow for automated builds:
+
+<CodeGroup>
+```yaml .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'pnpm'
+      - run: pnpm install
+      - run: cd apps/desktop/native && npx node-gyp rebuild
+      - run: pnpm turbo lint
+      - run: pnpm turbo typecheck
+      - run: pnpm turbo test
+      - run: pnpm turbo build
+```
+</CodeGroup>
+
+## Build scripts reference
+
+| Script | Description |
+|--------|-------------|
+| `pnpm install` | Install all dependencies (root + workspaces) |
+| `pnpm turbo dev` | Start development mode with hot-reload |
+| `pnpm turbo build` | Build all packages and apps for production |
+| `pnpm turbo start` | Run the built app (no dev server) |
+| `pnpm turbo lint` | Lint all workspaces |
+| `pnpm turbo test` | Run all tests |
+| `pnpm turbo typecheck` | Type-check all workspaces |
+| `cd apps/desktop && pnpm run make` | Package distributable |
+| `cd apps/desktop && pnpm run publish` | Build + notarize (macOS) |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="sliders" href="/developer/configuration">
+    Environment variables, core paths, and runtime configuration
+  </Card>
+  
+  <Card title="Testing" icon="vial" href="/developer/testing">
+    Run tests, write new tests, and debug test failures
+  </Card>
+</CardGroup>

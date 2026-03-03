@@ -1,0 +1,416 @@
+---
+title: Architecture
+description: Deep dive into GameLord's technical architecture and design patterns
+---
+
+GameLord is a native emulator frontend where Electron handles UI/library management and libretro cores are loaded directly via a native Node addon using dlopen. There are no external emulator processes.
+
+## High-level overview
+
+The application follows a multi-process architecture with clear separation of concerns:
+
+<Steps>
+  <Step title="Native addon loads libretro cores">
+    The `gamelord_libretro.node` native addon (`apps/desktop/native/src/libretro_core.cc`) loads libretro `.dylib` cores directly via dlopen, implementing the full libretro frontend API including environment callbacks, video/audio/input handling.
+  </Step>
+  
+  <Step title="Utility process runs emulation loop">
+    The emulation loop runs in a dedicated Electron utility process (`core-worker.ts`) with hybrid sleep+spin frame pacing (~0.1-0.5ms jitter). It sends video frames and audio samples to the main process via `postMessage`.
+  </Step>
+  
+  <Step title="Main process coordinates communication">
+    The main process forwards frames/audio to the renderer via `webContents.send` with `Buffer`. `EmulationWorkerClient` manages the worker lifecycle and request/response protocol.
+  </Step>
+  
+  <Step title="Renderer displays frames and plays audio">
+    The renderer displays frames on a `<canvas>` via WebGL shaders and plays audio via Web Audio API with seamless chunk scheduling.
+  </Step>
+  
+  <Step title="Input flows back through IPC">
+    Input is captured in the renderer (keyboard/gamepad events) and forwarded through the main process to the utility process worker via IPC.
+  </Step>
+</Steps>
+
+## Process architecture
+
+### Main process
+
+The main process (`apps/desktop/src/main.ts`) handles:
+
+- **Window management** - Creates and manages both the library window and game windows
+- **IPC coordination** - Routes messages between renderer and utility processes
+- **Library services** - ROM scanning, metadata fetching, database management
+- **Worker lifecycle** - Spawns and manages utility process workers for emulation
+- **File system operations** - Save states, SRAM, screenshots, artwork cache
+
+<Info>
+The main process never blocks on emulation - all core execution happens in isolated utility processes.
+</Info>
+
+### Renderer process
+
+Two separate renderer processes:
+
+**Library window** (`index.html`):
+- Game library grid with cover art
+- Search, filter, and sorting
+- Settings and core management UI
+- Artwork sync progress
+
+**Game window** (`game-window.html`):
+- WebGL canvas for frame rendering
+- Web Audio API for audio playback
+- Shader effects (CRT, LCD, scanlines)
+- Control overlays (pause, FPS counter)
+- Input capture (keyboard, gamepad)
+
+### Utility process (emulation worker)
+
+A dedicated Electron utility process (`core-worker.ts`) for each running game:
+
+- Loads the native addon dynamically via `require()`
+- Drives the emulation loop with precise frame timing
+- Handles save states and SRAM persistence
+- Isolated from main process for crash resilience
+
+```typescript
+// Worker lifecycle managed by EmulationWorkerClient
+const worker = utilityProcess.fork(
+  path.join(__dirname, 'workers/core-worker.js'),
+  [],
+  { stdio: 'pipe' }
+);
+```
+
+## Native addon architecture
+
+The `gamelord_libretro.node` addon bridges Node.js and libretro cores.
+
+### Key components
+
+<Accordion title="LibretroCore class (libretro_core.cc)">
+  The main C++ class wrapping libretro functionality:
+  
+  - **Dynamic loading** - Uses `dlopen` (macOS/Linux) or `LoadLibrary` (Windows) to load `.dylib`/`.dll` cores
+  - **Function resolution** - Resolves all libretro API function pointers via `dlsym`
+  - **Environment callbacks** - Implements libretro environment interface for core configuration
+  - **Frame buffers** - Lock-free circular ring buffer for audio (16384 samples), video frame buffer with XRGB8888 → RGBA conversion
+  - **State serialization** - Wraps core's save state functions
+  - **Memory management** - Exposes SRAM read/write for battery-backed saves
+</Accordion>
+
+<Accordion title="Static callbacks">
+  Libretro uses C function pointers, so callbacks are static and route through a singleton:
+  
+  ```cpp
+  static LibretroCore *s_instance;
+  
+  static void VideoRefreshCallback(const void *data, unsigned width, 
+                                    unsigned height, size_t pitch) {
+    if (s_instance) {
+      s_instance->handleVideoFrame(data, width, height, pitch);
+    }
+  }
+  ```
+  
+  <Warning>
+  The singleton constraint means only one core instance can be active at a time. See [#68](https://github.com/ryanmagoon/gamelord/issues/68) for multi-instance work.
+  </Warning>
+</Accordion>
+
+<Accordion title="N-API bindings">
+  All C++ methods are exposed to JavaScript via N-API:
+  
+  ```cpp
+  Napi::Object LibretroCore::Init(Napi::Env env, Napi::Object exports) {
+    Napi::Function func = DefineClass(env, "LibretroCore", {
+      InstanceMethod("loadCore", &LibretroCore::LoadCore),
+      InstanceMethod("loadGame", &LibretroCore::LoadGame),
+      InstanceMethod("run", &LibretroCore::Run),
+      InstanceMethod("getVideoFrame", &LibretroCore::GetVideoFrame),
+      InstanceMethod("getAudioBuffer", &LibretroCore::GetAudioBuffer),
+      // ...
+    });
+    exports.Set("LibretroCore", func);
+    return exports;
+  }
+  ```
+</Accordion>
+
+### Audio buffer design
+
+Replaced `std::mutex` + `std::vector` with a fixed-size circular ring buffer:
+
+- **Size**: 16384 samples (power-of-2 for modulo optimization)
+- **Lock-free**: Producer and consumer run on same thread, no atomics needed
+- **Overflow handling**: Wraps around with `memcpy` and modulo arithmetic
+- **Performance**: Eliminates mutex syscalls, vector reallocation, and O(n) erase operations
+
+See [#63](https://github.com/ryanmagoon/gamelord/issues/63) for implementation details.
+
+## Frame timing and synchronization
+
+### Hybrid sleep+spin loop
+
+The emulation loop uses a two-phase approach for sub-millisecond precision:
+
+1. **Sleep phase**: `setTimeout` for bulk of frame time minus spin threshold
+2. **Spin phase**: Busy-wait the last ~2ms for precise timing
+
+```typescript
+function scheduleNextFrame(targetFrameTime: number, lastFrameStart: number): void {
+  const elapsed = performance.now() - lastFrameStart;
+  const timeUntilNext = Math.max(0, targetFrameTime - elapsed);
+  
+  if (timeUntilNext > SPIN_THRESHOLD_MS) {
+    // Sleep for most of the frame time
+    setTimeout(() => spinWait(targetFrameTime, lastFrameStart), 
+               timeUntilNext - SPIN_THRESHOLD_MS);
+  } else {
+    spinWait(targetFrameTime, lastFrameStart);
+  }
+}
+
+function spinWait(targetFrameTime: number, lastFrameStart: number): void {
+  // Busy-wait for precise timing
+  while (performance.now() - lastFrameStart < targetFrameTime) {
+    // Spin
+  }
+  runFrame();
+}
+```
+
+Typical jitter: 0.1-0.5ms per frame.
+
+### Vsync-aligned rendering
+
+The renderer never draws directly from IPC events. Instead:
+
+1. IPC frames are buffered in memory
+2. `requestAnimationFrame` reads the latest buffered frame
+3. WebGL draws are aligned with display vsync
+4. Multiple IPC frames between vsyncs are naturally skipped
+
+This prevents screen tearing and maintains smooth 60Hz/120Hz output.
+
+### SharedArrayBuffer optimization
+
+When available (requires `Cross-Origin-Embedder-Policy: require-corp` headers):
+
+- **Video**: Double-buffered SAB with atomic active-buffer flag
+- **Audio**: SPSC ring buffer for zero-copy transfer
+- **Fallback**: Copy-based IPC via `Buffer` serialization
+
+See `shared-frame-protocol.ts` for implementation details.
+
+## Core management
+
+### Core discovery and download
+
+`CoreDownloader` (`apps/desktop/src/main/emulator/CoreDownloader.ts`) manages libretro cores:
+
+- Downloads cores on-demand from libretro buildbot
+- Stores cores in `~/Library/Application Support/GameLord/cores/`
+- Supports multiple cores per system (e.g., NES: fceumm, nestopia, mesen)
+- Platform detection for `.dylib` (macOS), `.dll` (Windows), `.so` (Linux)
+
+```typescript
+const PREFERRED_CORES: Record<string, string> = {
+  'nes': 'fceumm_libretro',
+  'snes': 'snes9x_libretro',
+  'genesis': 'genesis_plus_gx_libretro',
+  'gba': 'mgba_libretro',
+  // ...
+};
+```
+
+### EmulatorCore abstraction
+
+Abstract base class (`EmulatorCore.ts`) defines the interface:
+
+```typescript
+export abstract class EmulatorCore extends EventEmitter {
+  abstract launch(romPath: string, options?: EmulatorLaunchOptions): Promise<void>;
+  abstract saveState(slot: number): Promise<void>;
+  abstract loadState(slot: number): Promise<void>;
+  abstract screenshot(outputPath?: string): Promise<string>;
+  abstract pause(): Promise<void>;
+  abstract resume(): Promise<void>;
+  abstract reset(): Promise<void>;
+}
+```
+
+Implementations:
+- **LibretroNativeCore** - Native addon integration (primary)
+- **RetroArchCore** - Legacy overlay mode for external RetroArch process
+
+## Library management
+
+### ROM scanning
+
+`LibraryService` (`apps/desktop/src/main/services/LibraryService.ts`) handles ROM discovery:
+
+<Steps>
+  <Step title="Directory walk">
+    Recursively scans ROM directories, building candidate list with mtime.
+  </Step>
+  
+  <Step title="Mtime-based cache">
+    Skips re-hashing files with unchanged `romMtime` (stat-only verification).
+  </Step>
+  
+  <Step title="New-files-first ordering">
+    Processes unknown ROMs before known ones so new games appear in UI immediately.
+  </Step>
+  
+  <Step title="Parallel hashing">
+    Hashes 4 files concurrently (CRC32, SHA-1, MD5) for artwork API matching.
+  </Step>
+  
+  <Step title="Streamed progress events">
+    Emits `library:scanProgress` for each discovered game - no waiting for full scan.
+  </Step>
+</Steps>
+
+### Zip extraction
+
+Non-arcade systems extract ROMs from `.zip` at scan time:
+
+- Extracted ROMs cached in `<userData>/roms-cache/` with hash-prefixed filenames
+- Arcade `.zip` files passed through natively (MAME expects zips)
+- Cache cleaned up on game removal
+
+### Metadata and artwork
+
+`ArtworkService` integrates with ScreenScraper API:
+
+- Matches games via MD5/SHA-1/CRC32 hashes
+- Downloads cover art, screenshots, metadata
+- Caches artwork with `artwork://` custom protocol
+- Progressive loading - updates UI as each game resolves
+
+## State management
+
+### Save states
+
+Managed in the worker process:
+
+```typescript
+function saveState(slot: number): void {
+  const stateData = native.serializeState();
+  const statePath = getStatePath(slot); // e.g., saveStatesDir/RomName/state-1.sav
+  fs.writeFileSync(statePath, Buffer.from(stateData.buffer));
+}
+```
+
+- **Slots 0-9**: Manual save states
+- **Slot 99**: Autosave (created on pause/close)
+- Per-ROM subdirectories: `saveStatesDir/RomName/state-N.sav`
+
+### SRAM persistence
+
+Battery-backed saves (`.srm` files):
+
+- Loaded at game start: `loadSram()`
+- Saved periodically and on exit: `saveScrapeam()`
+- Skips all-zero data (no save present)
+- Path: `sramDir/RomName.srm`
+
+## IPC protocol
+
+All cross-process communication uses Electron's IPC:
+
+### Main ↔ Renderer
+
+```typescript
+// Renderer → Main (invoke pattern for request/response)
+const games = await window.api.library.getGames();
+
+// Main → Renderer (send pattern for events)
+mainWindow.webContents.send('library:scanProgress', { game, isNew, processed, total });
+```
+
+API surface defined in `preload.ts`.
+
+### Main ↔ Worker
+
+```typescript
+// Main → Worker (command)
+worker.postMessage({ action: 'init', corePath, romPath, systemDir, saveDir });
+
+// Worker → Main (event)
+process.parentPort.postMessage({ type: 'ready', avInfo });
+process.parentPort.postMessage({ type: 'video-frame', data, width, height });
+```
+
+Protocol defined in `core-worker-protocol.ts`.
+
+## Performance optimizations
+
+<CardGroup cols={2}>
+  <Card title="Lock-free audio buffer" icon="waveform">
+    Fixed-size circular buffer eliminates mutex overhead and vector reallocation.
+  </Card>
+  
+  <Card title="SharedArrayBuffer transfers" icon="share-nodes">
+    Zero-copy frame transfer between processes when SAB is available.
+  </Card>
+  
+  <Card title="Vsync-aligned draws" icon="display">
+    Renderer draws via `requestAnimationFrame` to match display refresh.
+  </Card>
+  
+  <Card title="Dense grid packing" icon="grid">
+    CSS Grid `dense` layout with computed aspect ratios eliminates dead space.
+  </Card>
+  
+  <Card title="Viewport culling" icon="scissors">
+    Virtualizes library grid for >100 games, reducing DOM nodes from 1200+ to ~40.
+  </Card>
+  
+  <Card title="Mtime-based cache" icon="clock">
+    Rescanning 2000+ unchanged ROMs completes in under 1 second (stat-only, no re-hash).
+  </Card>
+</CardGroup>
+
+## Security considerations
+
+### Path validation
+
+All file paths are validated before `dlopen()` and filesystem operations:
+
+```typescript
+// Prevent path traversal attacks
+function validatePath(inputPath: string, allowedDir: string): boolean {
+  const normalized = path.normalize(inputPath);
+  const resolved = path.resolve(allowedDir, normalized);
+  return resolved.startsWith(path.resolve(allowedDir));
+}
+```
+
+### Process isolation
+
+Utility processes provide crash resilience:
+- Core crashes don't affect main process or library window
+- Each game runs in isolated worker
+- Failed workers can be respawned
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="Building" icon="hammer" href="/developer/building">
+    Build system, dependencies, and platform-specific setup
+  </Card>
+  
+  <Card title="Configuration" icon="sliders" href="/developer/configuration">
+    Environment variables and configuration options
+  </Card>
+  
+  <Card title="Libretro cores" icon="microchip" href="/developer/libretro-cores">
+    Core integration, system support, and BIOS requirements
+  </Card>
+  
+  <Card title="Testing" icon="vial" href="/developer/testing">
+    Test suite, coverage, and testing guidelines
+  </Card>
+</CardGroup>

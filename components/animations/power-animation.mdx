@@ -1,0 +1,218 @@
+---
+title: PowerAnimation
+description: Factory component that renders system-specific power on/off animations based on original hardware display technology
+---
+
+## Overview
+
+The `PowerAnimation` component is a factory component that selects and renders the appropriate power animation based on the original system's display technology. It automatically chooses between CRT, LCD handheld, or LCD portable animations to create authentic, era-appropriate visual effects when powering games on or off.
+
+Use this component when you want GameLord to automatically select the correct animation style based on the system being emulated. For direct control over a specific animation type, use the individual animation components like `CRTAnimation`.
+
+## Props
+
+<ParamField path="displayType" type="DisplayType" required>
+  The display technology of the original hardware. Determines which animation style to render.
+  
+  Valid values:
+  - `'crt'` - CRT television animation (home consoles, arcade)
+  - `'lcd-handheld'` - Passive/reflective LCD animation (Game Boy, GBA, DS)
+  - `'lcd-portable'` - Backlit TFT/IPS animation (PSP, modern portables)
+</ParamField>
+
+<ParamField path="direction" type="'on' | 'off'" required>
+  Whether this is a power-on or power-off animation. Power-on animations simulate hardware warming up and revealing the screen. Power-off animations show the display shutting down.
+</ParamField>
+
+<ParamField path="onComplete" type="() => void" required>
+  Callback function invoked when the animation sequence completes. Use this to transition to the next state (e.g., showing the game canvas after power-on, closing the window after power-off).
+</ParamField>
+
+<ParamField path="duration" type="number">
+  Optional override for total animation duration in milliseconds. Each animation type has its own default duration tuned for authenticity. Only override this if you need synchronized timing across different animation types.
+  
+  Default durations:
+  - CRT power-on: 800ms
+  - CRT power-off: 500ms
+  - LCD animations: vary by type
+</ParamField>
+
+## Usage
+
+<CodeGroup>
+```tsx Basic usage
+import { PowerAnimation } from './animations'
+import { getDisplayType } from '../types/displayType'
+
+function GameLauncher({ systemId }: { systemId: string }) {
+  const [isPoweringOn, setIsPoweringOn] = useState(true)
+  const displayType = getDisplayType(systemId)
+
+  const handleAnimationComplete = () => {
+    setIsPoweringOn(false)
+    // Show game canvas
+  }
+
+  return (
+    <div className="game-container">
+      {isPoweringOn && (
+        <PowerAnimation
+          displayType={displayType}
+          direction="on"
+          onComplete={handleAnimationComplete}
+        />
+      )}
+      {/* Game canvas renders here after animation */}
+    </div>
+  )
+}
+```
+
+```tsx Power-off animation
+import { PowerAnimation } from './animations'
+
+function GameWindow({ displayType }: { displayType: DisplayType }) {
+  const [isPoweringOff, setIsPoweringOff] = useState(false)
+
+  const handleShutdown = () => {
+    setIsPoweringOff(true)
+  }
+
+  const handlePowerOffComplete = () => {
+    // Close window or return to library
+    window.close()
+  }
+
+  return (
+    <div className="game-window">
+      <GameCanvas />
+      
+      {isPoweringOff && (
+        <PowerAnimation
+          displayType={displayType}
+          direction="off"
+          onComplete={handlePowerOffComplete}
+        />
+      )}
+    </div>
+  )
+}
+```
+
+```tsx Custom duration
+import { PowerAnimation } from './animations'
+
+// Sync animation timing across different display types
+const CUSTOM_DURATION = 1000 // 1 second for all animations
+
+function SynchronizedLauncher({ displayType }: { displayType: DisplayType }) {
+  return (
+    <PowerAnimation
+      displayType={displayType}
+      direction="on"
+      duration={CUSTOM_DURATION}
+      onComplete={() => console.log('Animation complete!')}
+    />
+  )
+}
+```
+</CodeGroup>
+
+## Display type mapping
+
+GameLord includes a built-in mapping from system IDs to display types:
+
+```tsx
+import { getDisplayType } from '../types/displayType'
+
+// Returns 'crt' for home consoles
+getDisplayType('nes')      // 'crt'
+getDisplayType('snes')     // 'crt'
+getDisplayType('genesis')  // 'crt'
+getDisplayType('psx')      // 'crt'
+
+// Returns 'lcd-handheld' for early portables
+getDisplayType('gb')       // 'lcd-handheld'
+getDisplayType('gba')      // 'lcd-handheld'
+getDisplayType('nds')      // 'lcd-handheld'
+
+// Returns 'lcd-portable' for modern portables
+getDisplayType('psp')      // 'lcd-portable'
+
+// Defaults to 'crt' for unknown systems
+getDisplayType('unknown')  // 'crt'
+```
+
+## Animation behavior
+
+The `PowerAnimation` component delegates to specialized animation components based on the display type:
+
+- **CRT** (`displayType="crt"`): Simulates a CRT television warming up (horizontal line expanding to full screen with phosphor glow and static) or shutting down (screen collapsing to a line, then a glowing dot that fades out).
+
+- **LCD Handheld** (`displayType="lcd-handheld"`): Mimics the appearance of passive/reflective LCD screens powering on with characteristic ghosting and fade-in effects.
+
+- **LCD Portable** (`displayType="lcd-portable"`): Recreates the backlit TFT/IPS panel boot sequence with modern LCD characteristics.
+
+<Note>
+The animation is rendered with `z-index: 100` and `pointer-events: none`, positioned absolutely over the game canvas. It won't interfere with user interaction during the animation sequence.
+</Note>
+
+## Integration example
+
+Here's how `PowerAnimation` is used in GameLord's `GameWindow` component:
+
+```tsx
+import { PowerAnimation } from './animations'
+import { getDisplayType } from '../types/displayType'
+
+function GameWindow({ systemId }: { systemId: string }) {
+  const [isPoweringOn, setIsPoweringOn] = useState(true)
+  const [isPoweringOff, setIsPoweringOff] = useState(false)
+  const displayType = getDisplayType(systemId)
+
+  const handlePowerOnComplete = () => {
+    setIsPoweringOn(false)
+    // Start emulation, reveal game canvas
+  }
+
+  const handlePowerOffComplete = () => {
+    setIsPoweringOff(false)
+    // Close window or fade to library
+  }
+
+  return (
+    <div className="relative w-full h-full">
+      {/* Power-on animation */}
+      {isPoweringOn && (
+        <PowerAnimation
+          displayType={displayType}
+          direction="on"
+          onComplete={handlePowerOnComplete}
+        />
+      )}
+
+      {/* Power-off animation */}
+      {isPoweringOff && (
+        <PowerAnimation
+          displayType={displayType}
+          direction="off"
+          onComplete={handlePowerOffComplete}
+        />
+      )}
+
+      {/* Game canvas */}
+      <canvas id="game-canvas" />
+    </div>
+  )
+}
+```
+
+<Tip>
+For direct access to a specific animation type without the factory pattern, import and use `CRTAnimation`, `LCDHandheldAnimation`, or `LCDPortableAnimation` directly.
+</Tip>
+
+## Related components
+
+- [CRTAnimation](/components/animations/crt-animation) - Direct CRT television animation component
+- `LCDHandheldAnimation` - LCD handheld animation (Game Boy, GBA, DS)
+- `LCDPortableAnimation` - LCD portable animation (PSP and modern portables)

@@ -1,0 +1,334 @@
+---
+title: Visual effects
+description: Customize your gameplay with shaders, filters, and retro visual enhancements
+---
+
+GameLord includes a comprehensive shader system powered by WebGL2, offering CRT simulation, LCD effects, upscaling filters, and more.
+
+## Shader system overview
+
+GameLord's shader pipeline is built for flexibility and performance:
+
+- **WebGL2-powered** - Hardware-accelerated rendering with GLSL shaders
+- **Multi-pass support** - Chain multiple shader passes for complex effects
+- **Real-time switching** - Change shaders on-the-fly without restarting
+- **Per-system presets** - Different systems can remember different shader preferences
+- **Fallback handling** - Automatic fallback to simpler shaders if compilation fails
+
+<Note>
+  All shaders run on the GPU via WebGL2. On modern hardware, even complex multi-pass shaders maintain 60 FPS.
+</Note>
+
+## Available shader presets
+
+GameLord includes 18 built-in shader presets optimized for different display types and aesthetic preferences.
+
+### CRT Shaders
+
+Authentic cathode ray tube simulation for retro systems:
+
+<AccordionGroup>
+  <Accordion title="CRT Aperture">
+    Simulates an aperture grille CRT (like Sony Trinitron):
+    - Vertical shadow mask pattern
+    - Scanlines and phosphor bloom
+    - Slight barrel distortion
+    - Best for arcade and console games
+  </Accordion>
+  
+  <Accordion title="CRT Fast">
+    Lightweight CRT effect with minimal performance cost:
+    - Basic scanlines
+    - Subtle curvature
+    - Single-pass shader (very fast)
+    - Good for lower-end GPUs
+  </Accordion>
+  
+  <Accordion title="CRT Caligari">
+    Named after the silent film aesthetic:
+    - Dramatic barrel distortion
+    - Heavy vignetting
+    - Strong phosphor glow
+    - Cinematic feel
+  </Accordion>
+  
+  <Accordion title="CRT Geom">
+    Geometric CRT simulation:
+    - Physically-based curvature
+    - RGB phosphor triad
+    - Halation and bloom
+    - Multi-pass (heavier GPU load)
+  </Accordion>
+  
+  <Accordion title="CRT Geom Deluxe">
+    Enhanced version of CRT Geom:
+    - Additional glow pass
+    - Refined scanline algorithm
+    - Improved color reproduction
+    - Highest quality CRT effect
+  </Accordion>
+</AccordionGroup>
+
+### LCD Shaders
+
+Handheld console LCD screen simulation:
+
+<AccordionGroup>
+  <Accordion title="LCD PSP">
+    Simulates the PSP's TFT LCD screen:
+    - Subpixel grid (RGB stripe)
+    - Slight backlight bleed
+    - Sharpened pixels
+  </Accordion>
+  
+  <Accordion title="LCD GBA">
+    Game Boy Advance LCD effect:
+    - GBA color matrix (corrects washed-out colors)
+    - Subpixel grid with LCD response
+    - Accurate to original hardware
+  </Accordion>
+  
+  <Accordion title="LCD GBA + Motion Blur">
+    LCD GBA with ghosting:
+    - Simulates LCD response time
+    - Motion blur trails on fast movement
+    - Authentic to GBA's slow refresh rate
+  </Accordion>
+</AccordionGroup>
+
+### Upscaling and Filtering
+
+Sharp pixel scaling and smoothing:
+
+<AccordionGroup>
+  <Accordion title="Nearest Neighbor">
+    Pure pixel-perfect scaling:
+    - No filtering or smoothing
+    - Sharp, blocky pixels
+    - Zero performance cost
+    - Best for pixel art purists
+  </Accordion>
+  
+  <Accordion title="Linear">
+    Basic bilinear filtering:
+    - Smooth, slightly blurred
+    - Reduces pixel aliasing
+    - Good for low-resolution games
+  </Accordion>
+  
+  <Accordion title="Sharp Bilinear">
+    Hybrid scaling:
+    - Integer scaling up to nearest multiple
+    - Bilinear for the remainder
+    - Sharper than pure bilinear
+    - Minimal blur
+  </Accordion>
+  
+  <Accordion title="SABR (Scale and Blur Reduction)">
+    Edge-directed upscaling:
+    - Detects diagonal edges
+    - Smooths curves without blur
+    - Good for 2D sprites
+  </Accordion>
+  
+  <Accordion title="xBRZ Freescale">
+    Advanced pixel art scaler:
+    - Anti-aliased edges
+    - Preserves sharp details
+    - Heavy GPU load (multi-pass)
+    - Best at 4x+ scaling
+  </Accordion>
+</AccordionGroup>
+
+### Stylistic Effects
+
+Artistic filters and retro aesthetics:
+
+<AccordionGroup>
+  <Accordion title="Pixellate">
+    Chunky pixel effect:
+    - Artificially enlarges pixels
+    - Retro demoscene aesthetic
+    - Configurable block size
+  </Accordion>
+  
+  <Accordion title="Dither">
+    Ordered dithering:
+    - Reduces color depth
+    - Bayer matrix pattern
+    - Game Boy-style look
+  </Accordion>
+  
+  <Accordion title="Halftone">
+    Print-style dot pattern:
+    - CMYK halftone dots
+    - Comic book aesthetic
+    - Adjustable dot size
+  </Accordion>
+  
+  <Accordion title="NTSC Adaptive">
+    Composite video artifacts:
+    - NTSC color fringing
+    - Dot crawl and rainbowing
+    - Authentic to RF/composite output
+    - Adjusts per-system
+  </Accordion>
+  
+  <Accordion title="Motion Blur">
+    Temporal blending:
+    - Accumulates previous frames
+    - Cinematic motion blur
+    - Reduces flicker on interlaced games
+  </Accordion>
+</AccordionGroup>
+
+## Changing shaders
+
+<Steps>
+  <Step title="Open the shader menu">
+    While playing a game, hover the mouse to reveal the control overlay, then click the "Shaders" button.
+  </Step>
+  
+  <Step title="Select a preset">
+    Choose from the list of 18 available presets. The shader switches instantly.
+  </Step>
+  
+  <Step title="Test performance">
+    Enable the FPS counter (Settings menu) to verify the shader maintains 60 FPS.
+  </Step>
+</Steps>
+
+<Tip>
+  Shader selection is saved to localStorage. When you close and relaunch the game, your chosen shader is remembered.
+</Tip>
+
+## Performance considerations
+
+### Single-pass vs. multi-pass shaders
+
+**Single-pass shaders** (fastest):
+- Nearest, Linear, Sharp Bilinear, CRT Fast
+- Execute once per frame
+- Minimal GPU overhead
+- Safe for all hardware
+
+**Multi-pass shaders** (heavier):
+- CRT Geom, CRT Geom Deluxe, xBRZ, NTSC Adaptive
+- Render to intermediate textures
+- Chain multiple effects
+- Require more VRAM and GPU time
+
+<Warning>
+  Multi-pass shaders with 3+ passes should be tested on integrated GPUs to ensure 60 FPS. GameLord includes lighter alternatives if performance suffers.
+</Warning>
+
+### GPU bottlenecks
+
+Factors that affect shader performance:
+
+- **Window size** - Larger windows = more pixels to shade
+- **Pass count** - Each pass adds GPU cost
+- **Texture lookups** - Complex filters sample neighboring pixels
+- **GPU capabilities** - Integrated GPUs may struggle with heavy shaders
+
+<Note>
+  On Apple Silicon Macs (M1/M2/M3), even the most complex shaders run smoothly at 60 FPS thanks to unified memory and powerful GPU cores.
+</Note>
+
+### Testing shader performance
+
+<Steps>
+  <Step title="Enable FPS counter">
+    Open Settings menu > Toggle "Show FPS counter"
+  </Step>
+  
+  <Step title="Play a game">
+    Run an actual game (not a static screen) to generate realistic load
+  </Step>
+  
+  <Step title="Check FPS">
+    Confirm the counter stays at 60 FPS during fast action
+  </Step>
+  
+  <Step title="Try lighter shaders">
+    If FPS drops below 60, switch to a single-pass shader like CRT Fast or Sharp Bilinear
+  </Step>
+</Steps>
+
+## Display type recommendations
+
+### CRT-era systems (1980s-1990s)
+
+These systems were designed for CRT displays:
+
+- **NES, SNES, Genesis** - CRT Aperture or CRT Geom
+- **Arcade** - CRT Aperture (matches arcade monitors)
+- **PlayStation, Saturn** - CRT Geom Deluxe (3D games benefit from bloom)
+
+<Tip>
+  CRT shaders hide pixel art imperfections that were masked by CRT phosphor bloom on original hardware.
+</Tip>
+
+### Handheld systems
+
+LCD screens with unique characteristics:
+
+- **Game Boy Advance** - LCD GBA or LCD GBA + Motion Blur
+- **PSP** - LCD PSP
+- **Game Boy / Game Boy Color** - Dither preset (mimics monochrome LCD)
+- **Nintendo DS** - LCD PSP or Sharp Bilinear
+
+### Modern LCD/OLED displays
+
+For pixel-perfect clarity on modern screens:
+
+- **All systems** - Nearest Neighbor (pure pixels) or Sharp Bilinear (slight smoothing)
+- **High-DPI displays** - xBRZ Freescale (scales beautifully to 4K+)
+
+## Custom shader development
+
+<Note>
+  GameLord currently uses built-in GLSL shaders. Future versions will support loading Slang (`.slang`/`.slangp`) presets from the libretro shader ecosystem.
+</Note>
+
+For developers interested in shader authoring:
+
+- **Shader language** - GLSL (OpenGL Shading Language)
+- **Entry points** - Vertex and fragment shaders per pass
+- **Uniforms** - Texture resolution, output size, frame count, etc.
+- **Texture samplers** - Access to source frame and intermediate passes
+- **LUT support** - Load lookup textures for color grading
+
+See `packages/ui/webgl/shaders.ts` and `packages/ui/webgl/presets/` for examples.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Shader causes frame drops">
+    - Switch to a single-pass shader (Nearest, Linear, CRT Fast)
+    - Reduce window size (less pixels to shade)
+    - Check GPU utilization in Activity Monitor / Task Manager
+    - Some shaders are GPU-heavy by design (CRT Geom Deluxe, xBRZ)
+  </Accordion>
+  
+  <Accordion title="Shader doesn't apply / black screen">
+    - Check browser console for WebGL errors (Help > Toggle Developer Tools)
+    - Shader compilation may have failed - check for GLSL syntax errors
+    - WebGL2 may not be available (very old GPU or browser)
+    - Try switching to "Default" preset to reset
+  </Accordion>
+  
+  <Accordion title="Colors look wrong">
+    - Some shaders alter color reproduction (GBA Color Matrix, NTSC Adaptive)
+    - CRT shaders add phosphor bloom which desaturates bright colors
+    - Check that the shader is appropriate for the system (don't use LCD GBA on NES)
+    - Switch to Nearest or Linear for unmodified colors
+  </Accordion>
+  
+  <Accordion title="Image looks blurry">
+    - Linear and bilinear shaders intentionally blur pixels
+    - Use Nearest Neighbor or Sharp Bilinear for crisp pixels
+    - Some CRT shaders add bloom/halation which softens the image
+    - Window size affects sharpness - try resizing
+  </Accordion>
+</AccordionGroup>

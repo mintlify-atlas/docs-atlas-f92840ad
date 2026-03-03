@@ -1,0 +1,232 @@
+---
+title: useWebGLRenderer
+description: React hook for managing WebGL renderer state, shader selection, and fullscreen toggling.
+---
+
+## Overview
+
+The `useWebGLRenderer` hook provides state management for the WebGL renderer component, including initialization state tracking, shader selection, and fullscreen controls.
+
+## Import
+
+```typescript
+import { useWebGLRenderer } from './hooks/useWebGLRenderer'
+```
+
+## Signature
+
+```typescript
+function useWebGLRenderer(): {
+  isReady: boolean
+  currentShader: ShaderType
+  handleRendererReady: () => void
+  setRenderer: (renderer: WebGLRenderer | null) => void
+  changeShader: (shader: ShaderType) => void
+  toggleFullscreen: (canvas: HTMLCanvasElement) => void
+}
+```
+
+## Parameters
+
+This hook takes no parameters.
+
+## Return value
+
+<ResponseField name="isReady" type="boolean">
+  Whether the WebGL renderer has finished initializing and is ready to render frames.
+</ResponseField>
+
+<ResponseField name="currentShader" type="ShaderType">
+  The currently active shader preset. Possible values: `'default'` or `'crt'`.
+</ResponseField>
+
+<ResponseField name="handleRendererReady" type="() => void">
+  Callback to invoke when the renderer has completed initialization. Sets `isReady` to `true`.
+</ResponseField>
+
+<ResponseField name="setRenderer" type="(renderer: WebGLRenderer | null) => void">
+  Stores a reference to the WebGL renderer instance for internal use. Pass `null` to clear the reference.
+</ResponseField>
+
+<ResponseField name="changeShader" type="(shader: ShaderType) => void">
+  Changes the active shader preset. Only applies if a renderer instance has been set via `setRenderer`.
+  
+  <ParamField path="shader" type="ShaderType" required>
+    The shader preset to activate: `'default'` or `'crt'`.
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="toggleFullscreen" type="(canvas: HTMLCanvasElement) => void">
+  Toggles fullscreen mode for the specified canvas element. Exits fullscreen if already in fullscreen mode.
+  
+  <ParamField path="canvas" type="HTMLCanvasElement" required>
+    The canvas element to enter fullscreen mode.
+  </ParamField>
+</ResponseField>
+
+## Types
+
+```typescript
+export type ShaderType = 'default' | 'crt'
+```
+
+## Usage example
+
+### Basic usage in overlay mode
+
+```typescript App.tsx
+import { useWebGLRenderer } from './hooks/useWebGLRenderer'
+import { WebGLRendererComponent } from '@gamelord/ui'
+
+function App() {
+  const { currentShader, handleRendererReady, changeShader } = useWebGLRenderer()
+
+  return (
+    <div>
+      {/* Shader selection controls */}
+      <div className="flex gap-2">
+        <Button
+          variant={currentShader === 'default' ? 'default' : 'outline'}
+          onClick={() => changeShader('default')}
+        >
+          <Monitor className="h-4 w-4 mr-2" />
+          Default
+        </Button>
+        <Button
+          variant={currentShader === 'crt' ? 'default' : 'outline'}
+          onClick={() => changeShader('crt')}
+        >
+          <Tv className="h-4 w-4 mr-2" />
+          CRT
+        </Button>
+      </div>
+
+      {/* WebGL renderer component */}
+      <WebGLRendererComponent
+        className="h-full"
+        onReady={handleRendererReady}
+      />
+    </div>
+  )
+}
+```
+
+### Advanced usage with manual renderer control
+
+```typescript
+import { useWebGLRenderer } from './hooks/useWebGLRenderer'
+import { WebGLRenderer } from '@gamelord/ui'
+
+function GameCanvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const { isReady, setRenderer, changeShader, toggleFullscreen } = useWebGLRenderer()
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    // Initialize renderer
+    const renderer = new WebGLRenderer(canvas)
+    renderer.initialize()
+    renderer.setShader('crt')
+    setRenderer(renderer)
+
+    return () => {
+      renderer.destroy()
+      setRenderer(null)
+    }
+  }, [])
+
+  const handleFullscreen = () => {
+    if (canvasRef.current) {
+      toggleFullscreen(canvasRef.current)
+    }
+  }
+
+  return (
+    <div>
+      <canvas ref={canvasRef} width={256} height={240} />
+      
+      {isReady && (
+        <div className="controls">
+          <button onClick={() => changeShader('default')}>
+            Default Shader
+          </button>
+          <button onClick={() => changeShader('crt')}>
+            CRT Shader
+          </button>
+          <button onClick={handleFullscreen}>
+            Toggle Fullscreen
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+```
+
+## Features
+
+### Shader management
+
+Manages the current shader state and provides a type-safe API for switching between shader presets. The shader change is applied immediately to the stored renderer instance.
+
+### Initialization tracking
+
+Tracks whether the WebGL renderer has finished initialization, allowing you to conditionally render UI elements that depend on a ready renderer.
+
+### Fullscreen API integration
+
+Provides a simple wrapper around the Fullscreen API with error handling. Automatically detects if already in fullscreen mode and exits accordingly.
+
+## Implementation details
+
+### State management
+
+Uses `useState` for reactive state tracking of `isReady` and `currentShader`, ensuring UI updates when these values change.
+
+### Renderer reference
+
+Stores the WebGL renderer instance in a ref to avoid re-rendering when the instance is set or updated.
+
+### Callback stability
+
+All returned callbacks are wrapped in `useCallback` to maintain stable references across re-renders, preventing unnecessary re-initialization in consuming components.
+
+## Error handling
+
+The `toggleFullscreen` function catches and logs any errors from the Fullscreen API:
+
+```typescript
+toggleFullscreen: (canvas: HTMLCanvasElement) => {
+  if (!document.fullscreenElement) {
+    canvas.requestFullscreen().catch(err => {
+      console.error('Failed to enter fullscreen:', err)
+    })
+  } else {
+    document.exitFullscreen()
+  }
+}
+```
+
+<Note>
+  Fullscreen API requires user interaction (e.g., button click) to work. Calling `toggleFullscreen` from an effect or timer will fail due to browser security restrictions.
+</Note>
+
+## Related components
+
+- **WebGLRenderer**: The core WebGL rendering class that this hook manages
+- **WebGLRendererComponent**: Pre-built React component that uses WebGL renderer internally
+
+## Shader types
+
+GameLord currently supports two shader presets:
+
+| Shader | Description | Use Case |
+|--------|-------------|----------|
+| `default` | Sharp pixel rendering with no effects | Modern clean look, pixel-perfect rendering |
+| `crt` | CRT monitor simulation with scanlines and curvature | Authentic retro aesthetic |
+
+<Tip>
+  The CRT shader includes scanline effects, slight screen curvature, and color bleeding to simulate classic CRT displays.
+</Tip>

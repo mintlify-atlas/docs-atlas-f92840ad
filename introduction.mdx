@@ -1,0 +1,131 @@
+---
+title: Introduction to GameLord
+description: A modern, elegant emulation frontend with superior UI/UX polish and advanced features
+---
+
+## What is GameLord?
+
+GameLord is a modern emulation frontend built as a spiritual successor to OpenEmu, featuring superior UI/UX polish and advanced features. Built with Electron, React, TypeScript, and shadcn/ui, GameLord provides a beautiful, native-feeling interface for managing and playing your favorite retro games.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get GameLord running on your machine in under 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Complete setup guide with prerequisites and configuration
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/developer/architecture">
+    Learn about GameLord's technical design and structure
+  </Card>
+  <Card title="Library Management" icon="books" href="/user-guide/library-management">
+    Learn how to manage your game library
+  </Card>
+</CardGroup>
+
+## Key features
+
+<Note>
+  GameLord is currently in active development. Features and APIs may change.
+</Note>
+
+### Multi-system support
+
+Powered by libretro cores, GameLord supports multiple gaming systems including:
+
+- Nintendo Entertainment System (NES)
+- Super Nintendo Entertainment System (SNES)
+- Game Boy / Game Boy Color / Game Boy Advance
+- Nintendo 64, Nintendo DS
+- Sega Genesis / Mega Drive, Sega Saturn
+- Sony PlayStation, PlayStation Portable
+- Arcade systems
+- And more...
+
+### Beautiful native UI
+
+Built with shadcn/ui for a polished, macOS-native appearance. Every interaction is designed to feel intentional and delightful, with:
+
+- Elegant game library grid with cover art
+- Smooth transitions and animations
+- Dark mode with system theme support
+- Customizable visual shaders (CRT, LCD, scanlines)
+
+### High performance emulation
+
+GameLord uses a native Node.js addon to load libretro cores directly, with a dedicated utility process for the emulation loop:
+
+- WebGL rendering with shader effects
+- Optimized frame timing and vsync-aligned rendering
+- Zero-copy frame transfer via SharedArrayBuffer
+- Lock-free audio buffer for minimal latency
+
+### Library management
+
+Automatic ROM scanning with intelligent features:
+
+- Multi-system detection
+- Metadata and cover art from ScreenScraper
+- Incremental scanning with mtime-based caching
+- ZIP archive extraction for non-arcade systems
+- Search, filter, and sort by multiple criteria
+- Favorites and custom collections
+
+### Save state management
+
+Quick save/load functionality:
+
+- Multiple save state slots
+- Autosave on close
+- Save state serialization via libretro API
+- Resume game dialog on launch
+
+### Visual effects
+
+Retro visual enhancements via WebGL2:
+
+- CRT shaders with scanlines and aperture grille
+- LCD shaders with subpixel grid (perfect for Game Boy Advance)
+- Sharp bilinear filtering
+- Per-system shader preferences
+
+## Architecture overview
+
+GameLord uses a modern Electron architecture:
+
+1. **Native addon** (`gamelord_libretro.node`) loads libretro cores directly via dlopen, implementing the full libretro frontend API
+2. **Utility process** runs the emulation loop with hybrid sleep+spin frame pacing
+3. **Main process** manages windows, IPC handlers, and core coordination
+4. **Renderer process** displays frames on canvas and plays audio via Web Audio API
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  Renderer Process                    │
+│  (React UI, Canvas rendering, Web Audio playback)   │
+└──────────────────┬──────────────────────────────────┘
+                   │ IPC
+┌──────────────────▼──────────────────────────────────┐
+│                   Main Process                       │
+│     (Window management, IPC handlers, Library)      │
+└──────────────────┬──────────────────────────────────┘
+                   │ Message Protocol
+┌──────────────────▼──────────────────────────────────┐
+│                 Utility Process                      │
+│         (Emulation loop, Native addon)              │
+└──────────────────┬──────────────────────────────────┘
+                   │ N-API
+┌──────────────────▼──────────────────────────────────┐
+│              Native Addon (C++)                      │
+│  (dlopen libretro cores, implement environment API) │
+└─────────────────────────────────────────────────────┘
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Get started" icon="play" href="/quickstart">
+    Follow the quickstart guide to run GameLord locally
+  </Card>
+  <Card title="Read the docs" icon="book" href="/installation">
+    Dive deep into installation and configuration
+  </Card>
+</CardGroup>

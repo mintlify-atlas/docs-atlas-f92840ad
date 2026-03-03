@@ -1,0 +1,260 @@
+---
+title: GameWindow
+description: Native game window with emulation controls and shaders
+---
+
+The `GameWindow` component provides the native fullscreen game experience with emulation controls, save states, shaders, and power-on/off animations.
+
+## Import
+
+```typescript
+import { GameWindow } from '../components/GameWindow'
+```
+
+<Note>
+  `GameWindow` is a desktop-specific component located in `apps/desktop/src/renderer/components/`. It manages WebGL rendering, audio, input, and native window controls.
+</Note>
+
+## Basic usage
+
+```tsx
+import { GameWindow } from './components/GameWindow'
+
+function App() {
+  return <GameWindow />
+}
+```
+
+<Note>
+  GameWindow is automatically loaded by the main process when a game is launched. It receives game data via IPC events, so no props are needed.
+</Note>
+
+## Features
+
+### Emulation controls
+
+- **Play/Pause** - Space bar or button
+- **Reset** - Restart the game
+- **Screenshot** - Capture current frame
+- **Fast forward** - Tab key toggles 1x ↔ 2x (or custom speed)
+- **Speed menu** - Dropdown with 1x, 1.5x, 2x, 3x, 4x, 8x options
+
+### Save states
+
+- **5 save slots** (0-4) with visual slot selector
+- **Save** - F5 key or button
+- **Load** - F9 key or button
+- Saves are stored per-game in `~/Library/Application Support/GameLord/saves/`
+
+### Shaders
+
+Available shader presets:
+
+- **Default** - Pixelated, no shader
+- **CRT** - Scanlines and curvature
+- **LCD** - Handheld LCD effect
+- **Smooth** - Bilinear filtering
+
+Shader preference is saved per-system (e.g., CRT for NES, LCD for Game Boy).
+
+### Audio controls
+
+- Volume slider (0-100%)
+- Mute toggle button
+- Volume preference persisted to localStorage
+
+### Power animations
+
+System-specific boot/shutdown animations:
+
+- **CRT** (NES, SNES, Genesis) - Scanline collapse, white flash
+- **LCD Handheld** (Game Boy, Game Boy Color) - Slow vertical fade
+- **LCD Portable** (GBA, DS) - Fast fade with pixel shimmer
+
+## Keyboard controls
+
+### Game input
+
+| Key | Button |
+|-----|--------|
+| Z | A |
+| X | B |
+| A | X |
+| S | Y |
+| Arrow keys | D-pad |
+| Enter | Start |
+| Shift | Select |
+| Q | L |
+| W | R |
+
+### Emulator shortcuts
+
+| Key | Action |
+|-----|--------|
+| Space | Pause/Resume |
+| Tab | Fast forward toggle |
+| F5 | Save state |
+| F9 | Load state |
+
+## Gamepad support
+
+GameWindow automatically detects and polls connected gamepads:
+
+- Standard gamepad mapping (Xbox, PlayStation, Switch Pro)
+- Up to 4 controllers supported
+- Green gamepad icon shown when controller connected
+- Polling disabled when paused to save CPU
+
+## IPC events
+
+GameWindow listens to these IPC events from the main process:
+
+<ParamField path="game:loaded" type="{ game: Game }">
+  Emitted when a game is loaded. Sets the window title and loads system shader preference.
+</ParamField>
+
+<ParamField path="game:ready-for-boot" type="void">
+  Emitted after hero transition completes. Starts the power-on animation and enables rendering.
+</ParamField>
+
+<ParamField path="game:av-info" type="{ geometry: { baseWidth: number, baseHeight: number, aspectRatio: number } }">
+  Emitted when the core reports AV info. Updates canvas dimensions and aspect ratio.
+</ParamField>
+
+<ParamField path="game:video-frame" type="{ data: Uint8Array, width: number, height: number }">
+  Emitted for each video frame (fallback IPC path). Buffered and rendered in rAF loop.
+</ParamField>
+
+<ParamField path="game:audio-samples" type="{ samples: Uint8Array, sampleRate: number }">
+  Emitted for audio chunks (fallback IPC path). Scheduled via Web Audio API.
+</ParamField>
+
+<ParamField path="game:prepare-close" type="void">
+  Emitted when the user closes the window. Starts power-off animation and hides controls.
+</ParamField>
+
+<ParamField path="emulator:paused" type="void">
+  Emitted when emulation pauses. Updates pause button state.
+</ParamField>
+
+<ParamField path="emulator:resumed" type="void">
+  Emitted when emulation resumes. Updates pause button state.
+</ParamField>
+
+<ParamField path="emulator:speedChanged" type="{ multiplier: number }">
+  Emitted when emulation speed changes. Updates speed button label.
+</ParamField>
+
+## SharedArrayBuffer mode
+
+GameWindow supports zero-copy video/audio via SharedArrayBuffer:
+
+1. Main process sends SABs via MessagePort
+2. Renderer gets typed array views (control, video, audio)
+3. Video frames read directly from SAB in rAF loop
+4. Audio drained from ring buffer on each frame
+5. No IPC events needed during gameplay
+
+<Note>
+  SAB mode reduces video frame latency from ~8ms to ~2ms and eliminates IPC overhead during gameplay.
+</Note>
+
+## WebGL rendering
+
+GameWindow uses the `WebGLRenderer` class from `@gamelord/ui`:
+
+```typescript
+import { WebGLRenderer } from '@gamelord/ui'
+
+const renderer = new WebGLRenderer(canvas)
+renderer.initialize()
+renderer.setShader('crt')
+renderer.renderFrame({ data, width, height })
+```
+
+### Rendering pipeline
+
+1. **IPC buffer** - Video frame arrives and is buffered
+2. **rAF callback** - Triggered on next vsync
+3. **WebGL draw** - Frame uploaded to texture and rendered
+4. **Shader pass** - Fragment shader applies effects
+5. **Present** - SwapBuffers presents to screen
+
+<Warning>
+  Never render directly from IPC event handlers. Always buffer frames and draw in `requestAnimationFrame` to align with display vsync.
+</Warning>
+
+## Control bar behavior
+
+### Auto-hide logic
+
+- Controls slide in on first genuine cursor movement
+- Auto-hide after 1 second of inactivity
+- Stay visible while dropdown menus are open
+- Stay visible while cursor is over control bar
+- Hide immediately when cursor leaves window
+
+### Drag region
+
+- Persistent drag region at top edge (always draggable)
+- Top control bar uses `WebkitAppRegion: drag`
+- Buttons opt out with `WebkitAppRegion: no-drag`
+
+## Display type detection
+
+Power animations are selected based on system ID:
+
+```typescript
+export function getDisplayType(systemId?: string): 'crt' | 'lcd-handheld' | 'lcd-portable' {
+  switch (systemId) {
+    case 'gb':
+    case 'gbc':
+      return 'lcd-handheld'
+    case 'gba':
+    case 'nds':
+      return 'lcd-portable'
+    default:
+      return 'crt'
+  }
+}
+```
+
+## Performance considerations
+
+### Frame pacing
+
+- WebGL rendering synced to `requestAnimationFrame`
+- FPS measured via exponential moving average
+- FPS counter updated every 30 frames (~500ms)
+
+### Audio scheduling
+
+- Pre-buffer 60ms to prevent crackling
+- Max lookahead 120ms to prevent drift
+- Reset buffer if audio gets too far ahead
+
+### Input polling
+
+- Keyboard events handled directly (low latency)
+- Gamepad polled in rAF loop (60fps)
+- Polling disabled when paused
+
+## Settings menu
+
+Development-only settings (shown when `NODE_ENV === 'development'`):
+
+- **Show FPS** - Displays frame rate overlay
+- **Annotate** - Enables Agentation annotation toolbar
+
+## Traffic light visibility
+
+Native macOS traffic lights (close/minimize/maximize) are:
+
+- Hidden during power-on animation
+- Shown when controls are visible
+- Hidden during power-off animation
+- Hidden when controls auto-hide
+
+```typescript
+api.gameWindow.setTrafficLightVisible(showControls && !isPoweringOff)
+```

@@ -1,0 +1,274 @@
+---
+title: Playing games
+description: Launch games, use controls, and master keyboard shortcuts in GameLord
+---
+
+GameLord provides a polished, native emulation experience with WebGL rendering, hardware-accelerated shaders, and precise frame timing.
+
+## Launching games
+
+### Starting a game
+
+There are two ways to launch a game:
+
+<Steps>
+  <Step title="From the library grid">
+    Click any game card to open its detail view, then click the play button.
+  </Step>
+  
+  <Step title="Quick launch (current behavior)">
+    In the current version, clicking a game card launches it directly.
+  </Step>
+</Steps>
+
+<Note>
+  When you launch a game, GameLord creates a dedicated game window with native rendering. The emulation loop runs in a separate utility process for optimal performance.
+</Note>
+
+### Hero transition animation
+
+When launching from the library:
+
+- The game card expands and morphs into the game window
+- Window animates from the card's position to its final size
+- Boot animation plays once the window is ready
+- Window is automatically focused for immediate keyboard input
+
+### Resuming from autosave
+
+GameLord automatically saves your progress when you close a game:
+
+<Tip>
+  If an autosave exists, you'll be prompted to resume from your last session or start fresh.
+</Tip>
+
+Select your preference, and the game window opens with either:
+- **Resume** - Loads autosave state (slot 99) and continues where you left off
+- **Start Fresh** - Launches the game from the beginning
+
+## Game window
+
+### Window layout
+
+The game window features:
+
+- **Hidden inset title bar** - macOS-style traffic lights in the top-left
+- **Canvas rendering** - WebGL2-powered display with shader support
+- **Control overlays** - Hover to reveal play/pause, settings, and save state controls
+- **Aspect ratio locking** - Window maintains the core's native aspect ratio when resized
+
+### Window sizing
+
+GameLord intelligently sizes the game window:
+
+- Default height: 80% of your display height (or 3x base resolution, whichever is larger)
+- Width calculated from height using the core's reported aspect ratio
+- Accounts for non-square pixels (e.g., NES outputs 4:3 despite 256×240 base resolution)
+- Minimum size: 2x base resolution
+
+<Note>
+  Window size and position are saved per-system, so NES and GBA windows remember their own sizes.
+</Note>
+
+### Control visibility
+
+The game window shows overlays when:
+
+- You move the mouse (controls appear at top and bottom)
+- You hover over the control bars
+- A dropdown menu is open
+
+**Auto-hide behavior**: Controls fade after 1 second of inactivity, unless:
+- The cursor is over a control bar
+- A menu is open
+- The game is paused
+
+## Keyboard shortcuts
+
+GameLord provides fast keyboard shortcuts for common actions:
+
+| Shortcut | Action |
+|----------|--------|
+| `Space` | Pause/Resume |
+| `F5` | Quick save (current slot) |
+| `F9` | Quick load (current slot) |
+| `Tab` | Toggle fast-forward |
+| `Cmd+F` | Toggle fullscreen |
+
+<Warning>
+  Keyboard shortcuts only work when the game window is focused and you're not typing in an input field.
+</Warning>
+
+## Input mapping
+
+### Keyboard controls
+
+GameLord captures keyboard input from the renderer and forwards it through IPC to the emulation worker:
+
+1. Keyboard events captured in renderer (game window)
+2. Mapped to libretro joypad buttons
+3. Forwarded via `game:input` IPC to main process
+4. Sent to utility process worker
+5. Applied to emulation core
+
+<Tip>
+  Input mapping uses the libretro RetroPad abstraction, so controls work consistently across all cores and systems.
+</Tip>
+
+### Gamepad support
+
+GameLord includes experimental gamepad support using the Gamepad API:
+
+- Automatically detects connected controllers
+- Polls gamepad state in `requestAnimationFrame` loop
+- Forwards button/axis state via the same `game:input` pipeline as keyboard
+
+<Note>
+  Gamepad configuration UI is planned for a future release. Current mappings are hardcoded.
+</Note>
+
+## Playback controls
+
+### Pause and resume
+
+Pause the emulation at any time:
+
+- **Keyboard**: Press `Space`
+- **UI**: Click the play/pause button in the top control bar
+
+When paused:
+- Emulation loop stops (no frames advance)
+- Audio playback halts
+- "PAUSE" badge appears on screen
+- Controls remain visible
+
+<Tip>
+  Pausing is instant and doesn't affect save states - you can pause/resume freely without losing progress.
+</Tip>
+
+### Reset
+
+Reset the game to its initial state:
+
+- Opens the reset confirmation dialog
+- Confirm to restart the game from the beginning
+- Does not affect save states or SRAM
+
+<Warning>
+  Resetting clears all progress since your last save. Make sure to save your game first!
+</Warning>
+
+### Speed control
+
+Adjust emulation speed for different use cases:
+
+- **Normal speed (1x)**: Default, runs at the core's native frame rate
+- **Fast-forward**: Press `Tab` or click the speed button to toggle
+- **Custom speeds**: 2x, 4x, 8x available in the speed menu
+
+<Note>
+  Fast-forward is perfect for grinding, cutscenes, or testing. Audio is muted during fast-forward to avoid distortion.
+</Note>
+
+## Shutdown sequence
+
+When you close a game window:
+
+<Steps>
+  <Step title="User initiates close">
+    Click the close button or press `Cmd+W`.
+  </Step>
+  
+  <Step title="Window state saved">
+    GameLord saves the current window size and position before the shutdown animation.
+  </Step>
+  
+  <Step title="Emulation paused">
+    The emulation worker pauses to stop new frames.
+  </Step>
+  
+  <Step title="Data saved">
+    SRAM (battery saves) and autosave state (slot 99) are written to disk.
+  </Step>
+  
+  <Step title="Shutdown animation">
+    Renderer plays the CRT power-off animation, then signals ready-to-close.
+  </Step>
+  
+  <Step title="Window closes">
+    OS window fades and shrinks, then destroys.
+  </Step>
+  
+  <Step title="Worker shutdown">
+    The utility process terminates cleanly.
+  </Step>
+</Steps>
+
+<Tip>
+  The shutdown animation has a 2-second safety timeout - if something goes wrong, the window will force-close to prevent hanging.
+</Tip>
+
+## Performance
+
+### Frame pacing
+
+GameLord uses a hybrid sleep+spin approach for accurate frame timing:
+
+- Emulation loop runs in a dedicated utility process
+- Hybrid timing: sleeps until near the deadline, then spins for precision
+- Typical jitter: 0.1-0.5ms
+- Frames are synced to display vsync via `requestAnimationFrame`
+
+### Video rendering
+
+Zero-copy frame transfer for maximum performance:
+
+- **SharedArrayBuffer** - Double-buffered video + SPSC audio ring buffer
+- **MessagePort bridge** - Direct channel between utility process and renderer
+- **Fallback** - IPC transfer when SharedArrayBuffer is unavailable
+- **Vsync alignment** - Renderer draws frames in `requestAnimationFrame` loop
+
+### FPS monitoring
+
+Enable the FPS counter to monitor performance:
+
+1. Open the settings menu in the game window
+2. Toggle "Show FPS counter"
+3. FPS overlay appears in the corner (EMA of rAF timestamp deltas)
+4. Setting persists in localStorage
+
+<Note>
+  GameLord targets 60 FPS for most systems. The FPS counter helps identify performance bottlenecks or frame drops.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Game won't launch">
+    - Verify the ROM file still exists at its original path
+    - Check that the required libretro core is downloaded
+    - For Saturn games, ensure BIOS files are in `<userData>/BIOS/`
+    - Look for errors in the console (Help > Toggle Developer Tools)
+  </Accordion>
+  
+  <Accordion title="Input lag or stuttering">
+    - Close other applications to free up resources
+    - Try disabling multi-pass shaders (use "Sharp Bilinear" or "Nearest")
+    - Check FPS counter - if below 60, performance is bottlenecked
+    - Restart GameLord to clear any accumulated overhead
+  </Accordion>
+  
+  <Accordion title="Audio crackling">
+    - Audio buffer overflow/underflow can cause crackling
+    - Usually caused by frame drops or CPU spikes
+    - Try closing background apps or disabling shaders
+    - Check system audio settings for sample rate conflicts
+  </Accordion>
+  
+  <Accordion title="Controls not responding">
+    - Ensure the game window is focused
+    - Check that you're not typing in an input field
+    - Try clicking the canvas to focus it
+    - Gamepad support is experimental - try keyboard first
+  </Accordion>
+</AccordionGroup>

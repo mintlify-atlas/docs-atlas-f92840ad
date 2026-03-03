@@ -1,0 +1,234 @@
+---
+title: LibraryView
+description: Main library interface with filtering, search, and system tabs
+---
+
+The `LibraryView` component is the main interface for browsing and managing your game library. It includes search, filtering, system tabs, and real-time artwork sync.
+
+## Import
+
+```typescript
+import { LibraryView } from '../components/LibraryView'
+```
+
+<Note>
+  `LibraryView` is a desktop-specific component located in `apps/desktop/src/renderer/components/`. It wraps the shared `GameLibrary` component from `@gamelord/ui`.
+</Note>
+
+## Basic usage
+
+```tsx
+import { LibraryView } from './components/LibraryView'
+
+function App() {
+  const [launchingGameId, setLaunchingGameId] = useState<string | null>(null)
+
+  const handlePlayGame = async (game: Game, cardRect?: DOMRect) => {
+    setLaunchingGameId(game.id)
+    await launchGame(game)
+    setLaunchingGameId(null)
+  }
+
+  return (
+    <LibraryView
+      onPlayGame={handlePlayGame}
+      launchingGameId={launchingGameId}
+    />
+  )
+}
+```
+
+## Props
+
+<ParamField path="onPlayGame" type="(game: Game, cardRect?: DOMRect) => void" required>
+  Called when the user clicks a game card to play. Receives the game object and optional card bounding rect for hero animations.
+</ParamField>
+
+<ParamField path="getMenuItems" type="(game: Game) => GameCardMenuItem[]">
+  Returns menu items for a game's dropdown menu. Called lazily when the dropdown opens.
+</ParamField>
+
+<ParamField path="launchingGameId" type="string | null">
+  ID of a game currently being launched. Shows shimmer on that card and disables others.
+</ParamField>
+
+## Features
+
+### Header toolbar
+
+- **Library title** with game count
+- **Scan progress badge** during directory scans
+- **Artwork sync badge** with cancel button
+- **Download Artwork** button (opens credentials dialog if needed)
+- **Add Folder** button to scan a new directory
+- **Rescan** button to re-scan existing system folders
+
+### System filter tabs
+
+Tabs for each detected system with game counts:
+
+```tsx
+<Button variant="default">All (125)</Button>
+<Button variant="outline">NES (45)</Button>
+<Button variant="outline">SNES (38)</Button>
+<Button variant="outline">Genesis (42)</Button>
+```
+
+### Sync notifications
+
+Banner notifications after artwork sync completes:
+
+- **Success**: `"Downloaded artwork for 12 games. 3 not found."`
+- **Warning**: `"No artwork found. 5 games not recognized by ScreenScraper."`
+- **Error**: `"Artwork sync stopped: invalid ScreenScraper credentials."`
+
+### Core download progress
+
+Progress bar shown when downloading libretro cores:
+
+```tsx
+<div className="bg-blue-500/10">
+  Downloading snes9x_libretro... 45%
+  <div className="h-1 bg-blue-500" style={{ width: '45%' }} />
+</div>
+```
+
+### Empty library state
+
+When no games are found, shows the `EmptyLibrary` component with:
+
+- Quick scan button
+- Select directory button
+- Add system button
+
+## IPC events
+
+LibraryView listens to these IPC events:
+
+<ParamField path="library:scanProgress" type="{ game: Game, isNew: boolean, processed: number, total: number, skipped: number }">
+  Emitted during directory scans. New games are added to the library incrementally.
+</ParamField>
+
+<ParamField path="core:downloadProgress" type="{ coreName: string, systemId: string, phase: string, percent: number, error?: string }">
+  Emitted during core downloads. Shows progress bar in header.
+</ParamField>
+
+<ParamField path="artwork:progress" type="{ gameId: string, phase: ArtworkSyncPhase, current: number, total: number, coverArt?: string }">
+  Emitted for each game during artwork sync. Updates card phase and counter badge.
+</ParamField>
+
+<ParamField path="artwork:syncComplete" type="void">
+  Emitted when artwork sync finishes. Shows summary notification.
+</ParamField>
+
+<ParamField path="artwork:syncError" type="{ error: string, errorCode?: string }">
+  Emitted when artwork sync fails. Shows error notification.
+</ParamField>
+
+## Examples
+
+### With menu items
+
+```tsx
+import { ImageDown, X } from 'lucide-react'
+
+const getMenuItems = useCallback((game: Game) => [
+  {
+    label: 'Download Artwork',
+    icon: <ImageDown className="h-4 w-4 mr-2" />,
+    onClick: () => api.artwork.syncGame(game.id)
+  },
+  {
+    label: 'Remove from Library',
+    icon: <X className="h-4 w-4 mr-2" />,
+    onClick: () => api.library.removeGame(game.id)
+  }
+], [])
+
+<LibraryView
+  onPlayGame={handlePlayGame}
+  getMenuItems={getMenuItems}
+/>
+```
+
+### With hero animation
+
+```tsx
+const handlePlayGame = async (game: Game, cardRect?: DOMRect) => {
+  setLaunchingGameId(game.id)
+  
+  // cardRect contains the card's position for hero animation
+  if (cardRect) {
+    await animateCardToWindow(cardRect)
+  }
+  
+  await launchGame(game)
+  setLaunchingGameId(null)
+}
+
+<LibraryView
+  onPlayGame={handlePlayGame}
+  launchingGameId={launchingGameId}
+/>
+```
+
+## Auto-sync behavior
+
+LibraryView automatically syncs artwork for newly imported games:
+
+1. User adds a new folder or ROM
+2. Scan finds new games
+3. If ScreenScraper credentials are configured, auto-sync starts
+4. Cards show sync progress in real-time
+5. Cover art appears as downloads complete
+
+<Note>
+  Auto-sync only triggers if the user has already configured ScreenScraper credentials. Otherwise, the "Download Artwork" button opens the credentials dialog.
+</Note>
+
+## Credentials dialog
+
+First-time artwork sync prompts for ScreenScraper account:
+
+```tsx
+<AlertDialog>
+  <AlertDialogTitle>ScreenScraper Account</AlertDialogTitle>
+  <AlertDialogDescription>
+    GameLord uses ScreenScraper to download cover art and game metadata.
+    Enter your free account credentials to get started.
+  </AlertDialogDescription>
+  <Input placeholder="Username" />
+  <Input type="password" placeholder="Password" />
+  <Button>Save & Download</Button>
+</AlertDialog>
+```
+
+## Performance optimizations
+
+- **Incremental scan results** - New games appear immediately during scan
+- **Optimistic UI updates** - Favorite toggle updates instantly
+- **Per-game UI cache** - Only re-creates UI objects when source data changes
+- **External sync store** - Artwork phases bypass React re-renders
+- **Bounded progress events** - Limits IPC event frequency during large operations
+
+## Error handling
+
+### Sync error codes
+
+- `config-error` - Developer credentials missing from .env
+- `auth-failed` - Invalid ScreenScraper username/password
+- `rate-limited` - Too many requests, wait and retry
+- `timeout` - ScreenScraper not responding
+- `network-error` - No internet connection
+
+### User-facing messages
+
+```typescript
+switch (errorCode) {
+  case 'auth-failed':
+    return 'Invalid username or password. Please check your ScreenScraper credentials.'
+  case 'rate-limited':
+    return 'ScreenScraper is rate limiting requests. Please wait a moment and try again.'
+  // ...
+}
+```

@@ -1,0 +1,217 @@
+---
+title: Library management
+description: Learn how to scan, organize, and manage your game library in GameLord
+---
+
+GameLord provides powerful tools for organizing your ROM collection with automatic scanning, metadata fetching, and artwork management.
+
+## Setting up your library
+
+### ROM folder structure
+
+GameLord automatically creates a system-based folder structure on first launch:
+
+```
+~/ROMs/
+├── NES/
+├── SNES/
+├── Genesis/
+├── GB/
+├── GBA/
+├── N64/
+├── PS1/
+├── PSP/
+├── NDS/
+├── Saturn/
+└── Arcade/
+```
+
+Simply place your ROM files in the corresponding system folder, and GameLord will automatically detect them during scanning.
+
+## Scanning for games
+
+### Automatic ROM detection
+
+GameLord uses multi-system ROM detection with:
+
+- **Extension-based detection** - Matches file extensions to supported systems
+- **Folder-name detection** - Automatically identifies system when ROMs are in named folders (e.g., "NES", "SNES")
+- **Recursive scanning** - Searches subdirectories to find all ROMs
+
+<Steps>
+  <Step title="Scan your library">
+    Click the scan button in the toolbar to start detecting ROMs in your configured folders.
+  </Step>
+  
+  <Step title="New games appear first">
+    GameLord processes unknown ROMs first, so new games appear in your library immediately while known games are verified in the background.
+  </Step>
+  
+  <Step title="Live progress updates">
+    Watch the scanning badge show live progress as each game is discovered and hashed.
+  </Step>
+</Steps>
+
+### Supported file formats
+
+Each system supports specific ROM file formats:
+
+<AccordionGroup>
+  <Accordion title="Nintendo Systems">
+    - **NES**: `.nes`, `.fds`, `.unf`, `.unif`
+    - **SNES**: `.sfc`, `.smc`, `.swc`, `.fig`
+    - **Game Boy/Color**: `.gb`, `.gbc`, `.sgb`
+    - **Game Boy Advance**: `.gba`, `.agb`
+    - **Nintendo 64**: `.n64`, `.z64`, `.v64`
+    - **Nintendo DS**: `.nds`, `.dsi`, `.ids`
+  </Accordion>
+  
+  <Accordion title="Sega Systems">
+    - **Genesis**: `.md`, `.smd`, `.gen`, `.bin`
+    - **Saturn**: `.cue`, `.chd`, `.ccd`, `.mdf`
+  </Accordion>
+  
+  <Accordion title="Sony Systems">
+    - **PlayStation**: `.cue`, `.bin`, `.iso`, `.chd`, `.pbp`
+    - **PSP**: `.iso`, `.cso`, `.pbp`
+  </Accordion>
+  
+  <Accordion title="Arcade">
+    - **Arcade**: `.zip`, `.7z` (MAME format)
+  </Accordion>
+</AccordionGroup>
+
+### Compressed ROMs
+
+<Note>
+  GameLord automatically extracts ROMs from `.zip` archives for all non-arcade systems at scan time. Extracted files are cached in `<userData>/roms-cache/` for fast access.
+</Note>
+
+<Warning>
+  Arcade ROMs must remain in `.zip` format - they are not extracted, as MAME cores expect zipped files.
+</Warning>
+
+## Performance optimizations
+
+### Incremental scanning
+
+GameLord uses an intelligent caching system to make rescans nearly instant:
+
+- **mtime-based cache** - Unchanged files (same modification time) skip re-hashing
+- **Content hashing** - Files are identified by SHA-256 hash of their content
+- **Parallel processing** - Hashes up to 4 files concurrently
+- **O(1) lookups** - Reverse index maps ROM paths to games for instant lookups
+
+**Result**: Rescanning 2000+ unchanged ROMs completes in under 1 second.
+
+### Scan progress tracking
+
+The scanner emits incremental progress events so you see results immediately:
+
+- New games appear in the grid as they're discovered
+- Known games are verified after new ones (you don't wait for re-verification)
+- Progress badge shows live count: "processed/total (skipped via cache)"
+
+## Metadata and artwork
+
+### Automatic metadata fetching
+
+GameLord integrates with the ScreenScraper API to download:
+
+- Cover art thumbnails
+- Game titles, descriptions, and release dates
+- Developer and publisher information
+- Genre and player count
+- Community ratings
+
+<Tip>
+  Metadata queries use ROM checksums (CRC32, SHA-1, MD5) computed during scanning, ensuring accurate matches even if filenames differ.
+</Tip>
+
+### Artwork sync
+
+Artwork downloads happen in the background after scanning completes:
+
+1. GameLord computes ROM hashes (already done during scan)
+2. Queries ScreenScraper API with game checksums
+3. Downloads cover art for matched games
+4. Caches images locally at `<userData>/artwork/`
+5. Updates library grid as each image arrives
+
+<Note>
+  Cover art is served via the `artwork://` custom protocol for efficient caching and loading.
+</Note>
+
+## Game organization
+
+### Favorites
+
+Mark games as favorites with the heart icon:
+
+- **Toggle**: Click the heart on any game card (filled when favorited)
+- **Animation**: Heart pops with a satisfying animation on toggle
+- **Filter**: Use the favorites filter button in the toolbar to show only starred games
+- **Persisted**: Favorite status is saved to your library
+
+### Search and filtering
+
+Quickly find games using the library toolbar:
+
+- **Search** - Type to filter by game title
+- **Platform filter** - Show games from specific systems
+- **Favorites filter** - Display only favorited games
+- **Sort options** - Organize by title, last played, play time, or date added
+
+### Grid layout
+
+The library uses an optimized mosaic grid:
+
+- **Dense packing** - CSS Grid eliminates dead space between cards
+- **Aspect-aware** - Cards adjust height based on cover art aspect ratio
+- **Virtualization** - Large libraries (>100 games) render only visible cards for smooth scrolling
+- **FLIP animations** - Cards smoothly animate when filtered or sorted
+
+## Advanced features
+
+### ROM deduplication
+
+GameLord prevents duplicate games:
+
+- **Content-based IDs** - Games are identified by SHA-256 hash of ROM content
+- **Archive tracking** - Extracted zip files are linked to their source archive
+- **Smart re-imports** - Re-scanning the same zip skips re-extraction if cache exists
+
+### Library data storage
+
+Your library is stored as JSON at:
+
+- **Library database**: `<userData>/library.json`
+- **Config**: `<userData>/library-config.json`
+- **Artwork cache**: `<userData>/artwork/`
+- **Extracted ROMs**: `<userData>/roms-cache/`
+
+<Tip>
+  The library survives ROM file moves - games are tracked by content hash, not file path.
+</Tip>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Games not appearing after scan">
+    - Verify ROM files have correct extensions for their system
+    - Check that ROMs are in the correct system folder or a recognized subfolder
+    - Look for scan errors in the console (View > Toggle Developer Tools)
+  </Accordion>
+  
+  <Accordion title="Artwork not downloading">
+    - Ensure you have a ScreenScraper account configured
+    - Check your API rate limits (free accounts have request limits)
+    - Verify ROM checksums are computed (shown in game details)
+  </Accordion>
+  
+  <Accordion title="Slow scan performance">
+    - First scan is always slower (must hash all files)
+    - Subsequent scans use mtime cache and should be near-instant
+    - Large ROMs (PS1, Saturn) take longer to hash
+  </Accordion>
+</AccordionGroup>

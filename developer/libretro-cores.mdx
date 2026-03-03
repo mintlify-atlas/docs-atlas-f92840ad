@@ -1,0 +1,523 @@
+---
+title: Libretro cores
+description: How GameLord integrates libretro cores, supported systems, and adding new cores
+---
+
+GameLord uses [libretro](https://www.libretro.com/) cores for emulation. Libretro provides a unified API that allows a single frontend to support dozens of emulation cores without system-specific integration.
+
+## What is libretro?
+
+Libretro is a simple API that lets emulation cores ("cores") communicate with frontends ("GameLord"):
+
+- **Cores** provide emulation logic: load ROM, run frame, serialize state
+- **Frontends** provide I/O: video rendering, audio playback, input handling, save management
+
+GameLord loads cores as dynamic libraries (`.dylib`/`.so`/`.dll`) and calls their libretro API functions directly via a native Node addon.
+
+<Info>
+Unlike RetroArch (which runs as a separate process), GameLord loads cores in-process for lower latency and tighter integration.
+</Info>
+
+## How cores are loaded
+
+The native addon (`gamelord_libretro.node`) uses `dlopen` to load cores at runtime:
+
+<Steps>
+  <Step title="Core path validation">
+    The main process validates the core path is within the allowed directory:
+    
+    ```typescript
+    const corePath = path.join(coresDir, `${coreName}.dylib`);
+    if (!corePath.startsWith(coresDir)) {
+      throw new Error('Invalid core path');
+    }
+    ```
+  </Step>
+  
+  <Step title="Worker initialization">
+    The worker process receives the validated core path:
+    
+    ```typescript
+    worker.postMessage({
+      action: 'init',
+      corePath: '/path/to/cores/fceumm_libretro.dylib',
+      romPath: '/path/to/rom.nes',
+      // ...
+    });
+    ```
+  </Step>
+  
+  <Step title="Dynamic loading">
+    The native addon opens the library:
+    
+    ```cpp
+    dl_handle_ = dlopen(corePath, RTLD_LAZY);
+    if (!dl_handle_) {
+      // Handle error
+    }
+    ```
+  </Step>
+  
+  <Step title="Function resolution">
+    All libretro API functions are resolved via `dlsym`:
+    
+    ```cpp
+    fn_init_ = (retro_init_t)dlsym(dl_handle_, "retro_init");
+    fn_load_game_ = (retro_load_game_t)dlsym(dl_handle_, "retro_load_game");
+    // ... 20+ function pointers
+    ```
+  </Step>
+  
+  <Step title="Core initialization">
+    The core is initialized and callbacks are registered:
+    
+    ```cpp
+    fn_set_environment_(EnvironmentCallback);
+    fn_set_video_refresh_(VideoRefreshCallback);
+    fn_set_audio_sample_batch_(AudioSampleBatchCallback);
+    fn_set_input_poll_(InputPollCallback);
+    fn_set_input_state_(InputStateCallback);
+    fn_init_();
+    ```
+  </Step>
+  
+  <Step title="Game loading">
+    The ROM is loaded:
+    
+    ```cpp
+    retro_game_info game_info = {
+      .path = romPath,
+      .data = romData,
+      .size = romSize,
+      // ...
+    };
+    fn_load_game_(&game_info);
+    ```
+  </Step>
+</Steps>
+
+## Libretro API implementation
+
+### Environment callback
+
+The core queries the frontend for configuration via `RETRO_ENVIRONMENT_*` commands:
+
+```cpp
+bool LibretroCore::EnvironmentCallback(unsigned cmd, void *data) {
+  switch (cmd) {
+    case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+      *(const char **)data = s_instance->system_dir_.c_str();
+      return true;
+    
+    case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
+      *(const char **)data = s_instance->save_dir_.c_str();
+      return true;
+    
+    case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
+      retro_pixel_format fmt = *(retro_pixel_format *)data;
+      // Validate and store pixel format
+      return true;
+    
+    case RETRO_ENVIRONMENT_GET_VARIABLE:
+      // Core options (planned feature)
+      return false;
+    
+    // ... 40+ environment commands
+  }
+}
+```
+
+<Accordion title="Supported environment commands">
+  - `GET_SYSTEM_DIRECTORY` - BIOS files location
+  - `GET_SAVE_DIRECTORY` - SRAM save location
+  - `SET_PIXEL_FORMAT` - XRGB8888 or RGB565
+  - `SET_INPUT_DESCRIPTORS` - Controller button labels
+  - `GET_LOG_INTERFACE` - Logging callbacks
+  - `GET_PERF_INTERFACE` - Performance counters
+  - `SET_MEMORY_MAPS` - Memory regions for achievements
+  - `SET_GEOMETRY` - Video resolution changes
+  - `SET_SYSTEM_AV_INFO` - Timing/aspect ratio changes
+</Accordion>
+
+### Video callback
+
+The core pushes frames via `video_refresh` callback:
+
+```cpp
+void LibretroCore::VideoRefreshCallback(const void *data, unsigned width,
+                                         unsigned height, size_t pitch) {
+  if (!data) return; // Dupe frame
+  
+  auto *instance = s_instance;
+  
+  // Convert XRGB8888 → RGBA
+  const size_t frameSize = width * height * 4;
+  instance->video_frame_.resize(frameSize);
+  
+  const uint8_t *src = (const uint8_t *)data;
+  uint8_t *dst = instance->video_frame_.data();
+  
+  for (unsigned y = 0; y < height; ++y) {
+    const uint8_t *row = src + y * pitch;
+    for (unsigned x = 0; x < width; ++x) {
+      dst[0] = row[2]; // R
+      dst[1] = row[1]; // G
+      dst[2] = row[0]; // B
+      dst[3] = 255;    // A
+      row += 4;
+      dst += 4;
+    }
+  }
+  
+  instance->frame_ready_ = true;
+}
+```
+
+<Note>
+Format conversion happens in C++ for performance. JavaScript receives ready-to-render RGBA data.
+</Note>
+
+### Audio callback
+
+The core pushes audio samples via batch callback:
+
+```cpp
+size_t LibretroCore::AudioSampleBatchCallback(const int16_t *data, size_t frames) {
+  auto *instance = s_instance;
+  const size_t samples = frames * 2; // Stereo
+  
+  // Write to lock-free circular buffer
+  size_t writePos = instance->audio_write_pos_;
+  const size_t available = AUDIO_BUFFER_SIZE - 
+    (writePos - instance->audio_read_pos_);
+  
+  if (samples > available) {
+    // Buffer full, drop samples
+    return 0;
+  }
+  
+  // Wraparound-aware memcpy
+  const size_t mask = AUDIO_BUFFER_SIZE - 1;
+  const size_t idx1 = writePos & mask;
+  const size_t count1 = std::min(samples, AUDIO_BUFFER_SIZE - idx1);
+  
+  memcpy(&instance->audio_buffer_[idx1], data, count1 * sizeof(int16_t));
+  
+  if (count1 < samples) {
+    // Wrapped around
+    memcpy(&instance->audio_buffer_[0], data + count1, 
+           (samples - count1) * sizeof(int16_t));
+  }
+  
+  instance->audio_write_pos_ = writePos + samples;
+  return frames;
+}
+```
+
+### Input callbacks
+
+The frontend provides input state to the core:
+
+```cpp
+void LibretroCore::InputPollCallback() {
+  // No-op: input is polled by the frontend and cached
+}
+
+int16_t LibretroCore::InputStateCallback(unsigned port, unsigned device,
+                                          unsigned index, unsigned id) {
+  auto *instance = s_instance;
+  
+  if (device == RETRO_DEVICE_JOYPAD) {
+    return instance->input_state_[port] & (1 << id) ? 1 : 0;
+  }
+  
+  return 0;
+}
+```
+
+Input flows: `Renderer → Main → Worker → Native addon → Core`
+
+## Supported systems
+
+GameLord currently supports 12 systems with auto-download:
+
+| System | Preferred Core | Alt Cores | BIOS Required |
+|--------|----------------|-----------|---------------|
+| NES | FCEUmm | Nestopia, Mesen | No |
+| SNES | Snes9x | bsnes | No |
+| Genesis | Genesis Plus GX | PicoDrive | No |
+| Game Boy | Gambatte | mGBA | No |
+| Game Boy Color | Gambatte | mGBA | No |
+| Game Boy Advance | mGBA | VBA-M | No |
+| Nintendo 64 | Mupen64Plus | ParaLLEl N64 | No |
+| Nintendo DS | DeSmuME | - | No |
+| PlayStation | PCSX ReARMed | Beetle PSX | **Yes** |
+| PSP | PPSSPP | - | No |
+| Sega Saturn | Beetle Saturn | Yabause | **Yes** |
+| Arcade (MAME) | MAME | - | Varies |
+
+<Info>
+More systems are planned. See [#116](https://github.com/ryanmagoon/gamelord/issues/116) for the expansion roadmap (PS2, GameCube, Dreamcast, etc.).
+</Info>
+
+## Core selection
+
+Cores are mapped in `CoreDownloader.ts`:
+
+```typescript
+const PREFERRED_CORES: Record<string, string> = {
+  'nes': 'fceumm_libretro',
+  'snes': 'snes9x_libretro',
+  'genesis': 'genesis_plus_gx_libretro',
+  'gba': 'mgba_libretro',
+  'saturn': 'mednafen_saturn_libretro',
+  // ...
+};
+
+const SYSTEM_CORES: Record<string, string[]> = {
+  'nes': ['fceumm_libretro', 'nestopia_libretro', 'mesen_libretro'],
+  'snes': ['snes9x_libretro', 'bsnes_libretro'],
+  // ...
+};
+```
+
+Users can switch cores via the Settings UI (planned feature).
+
+## Adding a new system
+
+<Steps>
+  <Step title="Add system definition">
+    Edit `apps/desktop/src/types/library.ts`:
+    
+    ```typescript
+    export const DEFAULT_SYSTEMS: GameSystem[] = [
+      // ... existing systems
+      {
+        id: 'dreamcast',
+        name: 'Sega Dreamcast',
+        shortName: 'Dreamcast',
+        manufacturer: 'Sega',
+        extensions: ['.cdi', '.chd', '.gdi', '.zip'],
+        requiresBios: true,
+        biosFiles: ['dc_boot.bin', 'dc_flash.bin'],
+      },
+    ];
+    ```
+  </Step>
+  
+  <Step title="Add core mapping">
+    Edit `CoreDownloader.ts`:
+    
+    ```typescript
+    const PREFERRED_CORES: Record<string, string> = {
+      // ...
+      'dreamcast': 'flycast_libretro',
+    };
+    
+    const SYSTEM_CORES: Record<string, string[]> = {
+      // ...
+      'dreamcast': ['flycast_libretro', 'redream_libretro'],
+    };
+    
+    const CORE_DISPLAY_NAMES: Record<string, string> = {
+      // ...
+      'flycast_libretro': 'Flycast',
+      'redream_libretro': 'Redream',
+    };
+    ```
+  </Step>
+  
+  <Step title="Add ScreenScraper system ID">
+    Edit `ArtworkService.ts`:
+    
+    ```typescript
+    const SYSTEM_ID_MAP: Record<string, number> = {
+      // ...
+      'dreamcast': 23, // ScreenScraper system ID
+    };
+    ```
+  </Step>
+  
+  <Step title="Test core loading">
+    ```bash
+    # Download core manually
+    curl -o ~/Library/Application\ Support/GameLord/cores/flycast_libretro.dylib \
+      https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/flycast_libretro.dylib.zip
+    
+    # Extract and test
+    unzip flycast_libretro.dylib.zip
+    # Launch GameLord and try loading a .cdi ROM
+    ```
+  </Step>
+  
+  <Step title="Add BIOS documentation">
+    If the system requires BIOS files, document them in this guide and in the app's UI.
+  </Step>
+</Steps>
+
+<Warning>
+Always test with real games before committing. Some cores have quirks (e.g., Mesen doesn't load via the addon but works standalone - see Known Issues).
+</Warning>
+
+## Adding a new core for existing system
+
+To add an alternative core (e.g., `bsnes` for SNES):
+
+<Steps>
+  <Step title="Update core lists">
+    ```typescript
+    // Add to SYSTEM_CORES
+    'snes': ['snes9x_libretro', 'bsnes_libretro'],
+    
+    // Add display name
+    const CORE_DISPLAY_NAMES: Record<string, string> = {
+      'bsnes_libretro': 'bsnes',
+    };
+    
+    // Add description
+    const CORE_DESCRIPTIONS: Record<string, string> = {
+      'bsnes_libretro': 'Cycle-accurate SNES emulation. Perfect accuracy, higher CPU usage.',
+    };
+    ```
+  </Step>
+  
+  <Step title="Download and test">
+    ```bash
+    cd ~/Library/Application\ Support/GameLord/cores/
+    curl -O https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/bsnes_libretro.dylib.zip
+    unzip bsnes_libretro.dylib.zip
+    ```
+  </Step>
+  
+  <Step title="Add UI for core selection">
+    The core switcher UI is planned but not yet implemented. See [#91](https://github.com/ryanmagoon/gamelord/issues/91).
+  </Step>
+</Steps>
+
+## BIOS requirements
+
+### Sega Saturn
+
+Required files in `~/Library/Application Support/GameLord/BIOS/`:
+
+- **sega_101.bin** (Japan BIOS, 512 KB)
+- **mpr-17933.bin** (US/Europe BIOS, 512 KB)
+
+At least one BIOS is required. The core auto-selects based on game region.
+
+<Warning>
+BIOS files are copyrighted and cannot be legally distributed. You must dump them from your own hardware.
+</Warning>
+
+### PlayStation
+
+Required files in `~/Library/Application Support/GameLord/BIOS/`:
+
+- **scph5500.bin** (Japan, 512 KB)
+- **scph5501.bin** (US, 512 KB)
+- **scph5502.bin** (Europe, 512 KB)
+
+At least one region BIOS is required.
+
+### Verifying BIOS files
+
+Use checksums to verify BIOS integrity:
+
+<CodeGroup>
+```bash Saturn BIOS
+md5sum ~/Library/Application\ Support/GameLord/BIOS/sega_101.bin
+# Expected: 85ec9ca47d8f6807718151cbcca8b964
+
+md5sum ~/Library/Application\ Support/GameLord/BIOS/mpr-17933.bin
+# Expected: 3240872c70984b6cbfda1586cab68dbe
+```
+
+```bash PlayStation BIOS
+md5sum ~/Library/Application\ Support/GameLord/BIOS/scph5501.bin
+# Expected: 490f666e1afb15b7362b406ed1cea246
+```
+</CodeGroup>
+
+## Core buildbot URLs
+
+Libretro maintains nightly builds at [buildbot.libretro.com](https://buildbot.libretro.com/nightly/):
+
+| Platform | URL |
+|----------|-----|
+| macOS ARM64 | `https://buildbot.libretro.com/nightly/apple/osx/arm64/latest/` |
+| macOS x86_64 | `https://buildbot.libretro.com/nightly/apple/osx/x86_64/latest/` |
+| Linux x86_64 | `https://buildbot.libretro.com/nightly/linux/x86_64/latest/` |
+| Windows x86_64 | `https://buildbot.libretro.com/nightly/windows/x86_64/latest/` |
+
+<Info>
+GameLord currently only supports macOS ARM64. Cross-platform support is tracked in [#118](https://github.com/ryanmagoon/gamelord/issues/118).
+</Info>
+
+## Troubleshooting
+
+<Accordion title="Core fails to load: 'dlopen error'">
+  Check the core file is present and not corrupted:
+  
+  ```bash
+  ls -lh ~/Library/Application\ Support/GameLord/cores/
+  file ~/Library/Application\ Support/GameLord/cores/fceumm_libretro.dylib
+  ```
+  
+  On macOS, cores may be quarantined by Gatekeeper:
+  
+  ```bash
+  xattr -d com.apple.quarantine ~/Library/Application\ Support/GameLord/cores/*.dylib
+  ```
+</Accordion>
+
+<Accordion title="Core loads but game won't start">
+  Check logs for environment callback errors:
+  
+  ```bash
+  tail -f ~/Library/Logs/GameLord/main.log | grep -i error
+  ```
+  
+  Common issues:
+  - Missing BIOS files
+  - Unsupported ROM format (e.g., `.cue` without matching `.bin`)
+  - Corrupted ROM file
+</Accordion>
+
+<Accordion title="Audio stuttering or crackling">
+  The audio buffer may be too small. Increase `AUDIO_BUFFER_SIZE` in `libretro_core.cc` and rebuild:
+  
+  ```cpp
+  static const size_t AUDIO_BUFFER_SIZE = 32768; // Default: 16384
+  ```
+</Accordion>
+
+<Accordion title="Frame drops or stuttering">
+  Check system load:
+  
+  ```bash
+  # macOS
+  sudo powermetrics --samplers cpu_power -i 1000 -n 1
+  
+  # Linux
+  htop
+  ```
+  
+  High-accuracy cores (bsnes, Beetle PSX) require more CPU. Switch to performance cores (Snes9x, PCSX ReARMed).
+</Accordion>
+
+## Known issues
+
+- **Mesen core** fails to load games via the native addon (works in standalone C test). Use fceumm instead.
+- **Singleton constraint**: Only one core instance can be active at a time. See [#68](https://github.com/ryanmagoon/gamelord/issues/68).
+
+## Related resources
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/developer/architecture">
+    Deep dive into native addon implementation and callbacks
+  </Card>
+  
+  <Card title="Building" icon="hammer" href="/developer/building">
+    Build the native addon and test cores locally
+  </Card>
+</CardGroup>

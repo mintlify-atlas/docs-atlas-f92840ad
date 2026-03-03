@@ -1,0 +1,422 @@
+---
+title: Configuration
+description: Environment variables, directories, and runtime configuration options
+---
+
+GameLord's configuration is split between environment variables (for API credentials and build settings) and runtime configuration (stored in the user data directory).
+
+## Environment variables
+
+Create a `.env` file in `apps/desktop/` to configure optional features:
+
+<CodeGroup>
+```bash .env.example
+# ScreenScraper API developer credentials
+# Register at https://www.screenscraper.fr/forumsujets.php?frub=12&numpage=0
+SCREENSCRAPER_DEV_ID=
+SCREENSCRAPER_DEV_PASSWORD=
+```
+
+```bash .env (development)
+SCREENSCRAPER_DEV_ID=your_dev_id_here
+SCREENSCRAPER_DEV_PASSWORD=your_dev_password_here
+```
+</CodeGroup>
+
+<Warning>
+Never commit `.env` to version control. The `.gitignore` already excludes it, but always verify before pushing.
+</Warning>
+
+### ScreenScraper API
+
+GameLord uses [ScreenScraper](https://www.screenscraper.fr/) for game metadata and cover art:
+
+<Steps>
+  <Step title="Register for an account">
+    Visit [screenscraper.fr](https://www.screenscraper.fr/) and create a free account.
+  </Step>
+  
+  <Step title="Request developer credentials">
+    Post in the [developer forum](https://www.screenscraper.fr/forumsujets.php?frub=12&numpage=0) requesting a dev ID and password. Include your project name and purpose.
+  </Step>
+  
+  <Step title="Add credentials to .env">
+    Once approved, add your credentials:
+    
+    ```bash
+    SCREENSCRAPER_DEV_ID=gamelord
+    SCREENSCRAPER_DEV_PASSWORD=your_assigned_password
+    ```
+  </Step>
+</Steps>
+
+<Info>
+Without ScreenScraper credentials, artwork sync will fail. The app will still function, but games won't have cover art or metadata.
+</Info>
+
+### Build-time variables
+
+These are used during packaging and notarization:
+
+<CodeGroup>
+```bash macOS code signing
+# Apple Developer credentials for code signing and notarization
+APPLE_DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)"
+APPLE_ID="your-apple-id@example.com"
+APPLE_ID_PASSWORD="app-specific-password"  # Generate at appleid.apple.com
+APPLE_TEAM_ID="TEAMID"
+```
+
+```bash Windows code signing
+# Windows code signing certificate
+WIN_CSC_LINK="path/to/certificate.pfx"
+WIN_CSC_KEY_PASSWORD="certificate_password"
+```
+</CodeGroup>
+
+<Note>
+Code signing variables are only needed for distribution builds (`pnpm run publish`). Development builds work without them.
+</Note>
+
+## User data directory
+
+GameLord stores all runtime data in the Electron user data directory:
+
+<Tabs>
+  <Tab title="macOS">
+    ```
+    ~/Library/Application Support/GameLord/
+    ```
+  </Tab>
+  
+  <Tab title="Linux">
+    ```
+    ~/.config/GameLord/
+    ```
+  </Tab>
+  
+  <Tab title="Windows">
+    ```
+    %APPDATA%\GameLord\
+    ```
+  </Tab>
+</Tabs>
+
+### Directory structure
+
+```
+GameLord/
+├── cores/                    # Downloaded libretro cores
+│   ├── fceumm_libretro.dylib
+│   ├── snes9x_libretro.dylib
+│   └── ...
+├── BIOS/                     # BIOS files for systems that require them
+│   ├── sega_101.bin         # Saturn BIOS
+│   └── mpr-17933.bin        # Saturn BIOS
+├── save-states/              # Per-game save state directories
+│   ├── SuperMario64/
+│   │   ├── autosave.sav
+│   │   ├── state-1.sav
+│   │   └── state-2.sav
+│   └── ...
+├── sram/                     # Battery-backed saves (.srm files)
+│   ├── SuperMario64.srm
+│   └── ...
+├── screenshots/              # Screenshots (raw RGBA format)
+│   ├── screenshot-1234567890.raw
+│   └── ...
+├── roms-cache/              # Extracted ROMs from zip archives
+│   ├── a1b2c3d4-rom.nes
+│   └── ...
+├── artwork/                  # Cached cover art from ScreenScraper
+│   ├── 12345-boxart.jpg
+│   └── ...
+├── library.json             # Game library database
+├── library-config.json      # Library scan paths and system definitions
+└── logs/                    # Application logs
+    ├── main.log
+    └── renderer.log
+```
+
+<Info>
+The user data directory is created automatically on first launch. You can open it from the app via the Settings menu (planned feature).
+</Info>
+
+## Runtime configuration files
+
+### library-config.json
+
+Stores library scan paths and system configurations:
+
+```json
+{
+  "systems": [
+    {
+      "id": "nes",
+      "name": "Nintendo Entertainment System",
+      "shortName": "NES",
+      "manufacturer": "Nintendo",
+      "extensions": [".nes", ".zip", ".7z"],
+      "requiresBios": false
+    }
+    // ... more systems
+  ],
+  "romsBasePath": "/Users/you/ROMs",
+  "scanRecursive": true,
+  "autoScan": false
+}
+```
+
+<Accordion title="System definition fields">
+  - **id**: Unique identifier (e.g., `nes`, `snes`, `genesis`)
+  - **name**: Full display name
+  - **shortName**: Abbreviated name for UI space constraints
+  - **manufacturer**: Console manufacturer
+  - **extensions**: Supported file extensions (include `.zip`/`.7z` for compressed ROMs)
+  - **requiresBios**: Whether the system needs BIOS files
+  - **biosFiles** (optional): Array of required BIOS filenames
+</Accordion>
+
+### library.json
+
+Game library database (managed by `LibraryService`):
+
+```json
+{
+  "games": [
+    {
+      "id": "sha256-hash-of-rom-content",
+      "title": "Super Mario 64",
+      "systemId": "n64",
+      "romPath": "/Users/you/ROMs/N64/SuperMario64.z64",
+      "romMtime": 1234567890123,
+      "romHashes": {
+        "crc32": "635a2bff",
+        "sha1": "9bef1128717f958171a4afac3ed78ee2bb4e86ce",
+        "md5": "20b854b239203baf6c961b850a4a51a2"
+      },
+      "coverArt": "artwork://12345",
+      "metadata": {
+        "releaseDate": "1996-06-23",
+        "genre": "Platform",
+        "publisher": "Nintendo",
+        "developer": "Nintendo EAD",
+        "players": 1,
+        "rating": 0.95
+      },
+      "favorite": false,
+      "playCount": 0,
+      "totalPlaytime": 0
+    }
+  ]
+}
+```
+
+<Note>
+Don't edit `library.json` manually while the app is running - changes will be overwritten. Use the library UI or IPC handlers to modify game data.
+</Note>
+
+## Core configuration
+
+### Core paths
+
+Cores are downloaded automatically to:
+
+```
+~/Library/Application Support/GameLord/cores/
+```
+
+Manual core installation:
+
+<Steps>
+  <Step title="Download core from buildbot">
+    Visit [buildbot.libretro.com](https://buildbot.libretro.com/nightly/) and navigate to your platform:
+    
+    - macOS ARM64: `apple/osx/arm64/latest/`
+    - macOS x86_64: `apple/osx/x86_64/latest/`
+    - Linux x86_64: `linux/x86_64/latest/`
+    - Windows x86_64: `windows/x86_64/latest/`
+  </Step>
+  
+  <Step title="Extract the core">
+    Unzip the downloaded `.zip` file. You'll get a `.dylib` (macOS), `.so` (Linux), or `.dll` (Windows) file.
+  </Step>
+  
+  <Step title="Place in cores directory">
+    Move the core file to:
+    
+    ```
+    ~/Library/Application Support/GameLord/cores/
+    ```
+    
+    Keep the original filename (e.g., `fceumm_libretro.dylib`).
+  </Step>
+</Steps>
+
+### BIOS files
+
+Some systems (Saturn, PlayStation) require BIOS files:
+
+<Tabs>
+  <Tab title="Sega Saturn">
+    Required files in `GameLord/BIOS/`:
+    
+    - `sega_101.bin` (Japanese BIOS)
+    - `mpr-17933.bin` (US/EU BIOS)
+    
+    <Warning>
+    BIOS files are copyrighted and cannot be distributed with GameLord. You must dump them from your own hardware or obtain them legally.
+    </Warning>
+  </Tab>
+  
+  <Tab title="PlayStation">
+    Required files in `GameLord/BIOS/`:
+    
+    - `scph5500.bin` (Japan)
+    - `scph5501.bin` (US)
+    - `scph5502.bin` (Europe)
+    
+    At least one region BIOS is required. The core will auto-detect based on game region.
+  </Tab>
+</Tabs>
+
+<Info>
+The `BIOS/` directory is created automatically on first launch. Place BIOS files there and restart the app.
+</Info>
+
+## Logging
+
+Logging is handled by `electron-log`:
+
+```typescript
+import log from 'electron-log';
+
+log.info('Application started');
+log.warn('Something unexpected happened');
+log.error('An error occurred', error);
+```
+
+### Log locations
+
+<Tabs>
+  <Tab title="macOS">
+    ```
+    ~/Library/Logs/GameLord/main.log
+    ~/Library/Logs/GameLord/renderer.log
+    ```
+  </Tab>
+  
+  <Tab title="Linux">
+    ```
+    ~/.config/GameLord/logs/main.log
+    ~/.config/GameLord/logs/renderer.log
+    ```
+  </Tab>
+  
+  <Tab title="Windows">
+    ```
+    %USERPROFILE%\AppData\Roaming\GameLord\logs\main.log
+    %USERPROFILE%\AppData\Roaming\GameLord\logs\renderer.log
+    ```
+  </Tab>
+</Tabs>
+
+### Log levels
+
+```typescript
+// Set log level (default: 'info' in prod, 'debug' in dev)
+log.transports.file.level = 'debug';
+log.transports.console.level = 'debug';
+
+// Available levels: error, warn, info, verbose, debug, silly
+```
+
+<Accordion title="Viewing logs">
+  Development:
+  ```bash
+  # Main process logs go to terminal
+  pnpm start
+  
+  # Renderer logs visible in DevTools Console (Cmd+Option+I)
+  ```
+  
+  Production:
+  ```bash
+  # Tail main process log
+  tail -f ~/Library/Logs/GameLord/main.log
+  
+  # Tail renderer log
+  tail -f ~/Library/Logs/GameLord/renderer.log
+  ```
+</Accordion>
+
+## Performance tuning
+
+### Frame pacing
+
+Adjust the spin threshold for frame timing (in `core-worker.ts`):
+
+```typescript
+// Lower = more precise timing, higher CPU usage
+// Higher = lower CPU usage, more jitter
+const SPIN_THRESHOLD_MS = 2; // Default: 2ms
+```
+
+### Audio buffer size
+
+Adjust the audio ring buffer size (in `libretro_core.cc`):
+
+```cpp
+// Default: 16384 samples (power-of-2)
+// Larger = more buffering, less underruns
+// Smaller = lower latency, more risk of underruns
+static const size_t AUDIO_BUFFER_SIZE = 16384;
+```
+
+### Hash concurrency
+
+Adjust parallel hashing during library scans (in `LibraryService.ts`):
+
+```typescript
+// Number of ROMs to hash concurrently
+const HASH_CONCURRENCY = 4; // Default: 4
+```
+
+<Warning>
+Changing these values requires rebuilding from source. They're not exposed in the UI (yet).
+</Warning>
+
+## Development mode features
+
+### Git branch indicator
+
+The dev build injects git context as compile-time constants:
+
+```typescript
+// Available in renderer during development
+const branch = __DEV_GIT_BRANCH__;        // "feat/new-feature"
+const worktree = __DEV_WORKTREE_NAME__;   // "worktree-name"
+const path = __DEV_WORKTREE_PATH__;       // "/path/to/worktree"
+```
+
+These are displayed in the UI to help identify which branch/worktree you're testing.
+
+### Hot reload
+
+Main process and workers rebuild on file changes, but require a full restart. Renderer uses React Fast Refresh for instant updates.
+
+<Info>
+If hot reload stops working, restart the dev server: `Ctrl+C` then `pnpm start`
+</Info>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/developer/architecture">
+    Understand the multi-process architecture and data flow
+  </Card>
+  
+  <Card title="Libretro cores" icon="microchip" href="/developer/libretro-cores">
+    Learn about core integration, system support, and BIOS requirements
+  </Card>
+</CardGroup>

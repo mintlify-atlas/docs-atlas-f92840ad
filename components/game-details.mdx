@@ -1,0 +1,178 @@
+---
+title: GameDetails
+description: Full game details view with stats and metadata
+---
+
+The `GameDetails` component displays comprehensive information about a game, including cover art, stats, and action buttons.
+
+## Import
+
+```typescript
+import { GameDetails, type GameDetailsProps } from '@gamelord/ui'
+```
+
+## Basic usage
+
+```tsx
+import { GameDetails } from '@gamelord/ui'
+
+function GameDetailsPage() {
+  const game = {
+    id: '1',
+    title: 'Super Mario Bros.',
+    platform: 'NES',
+    systemId: 'nes',
+    genre: 'Platform',
+    coverArt: '/artwork/smb.png',
+    romPath: '/roms/smb.nes',
+    lastPlayed: new Date(),
+    playTime: 7200, // 2 hours in seconds
+  }
+
+  return (
+    <GameDetails
+      game={game}
+      onPlay={(game) => console.log('Playing:', game.title)}
+      onSettings={(game) => console.log('Settings for:', game.title)}
+    />
+  )
+}
+```
+
+## Props
+
+<ParamField path="game" type="Game" required>
+  Game object to display. Uses the same `Game` interface as GameCard.
+</ParamField>
+
+<ParamField path="onPlay" type="(game: Game) => void" required>
+  Called when the user clicks the "Play Now" button.
+</ParamField>
+
+<ParamField path="onSettings" type="(game: Game) => void">
+  Called when the user clicks the "Settings" button. If not provided, the settings button is hidden.
+</ParamField>
+
+<ParamField path="className" type="string">
+  Additional CSS classes to apply to the root element.
+</ParamField>
+
+## Layout sections
+
+### Header with cover art
+
+- Large cover art (192×256px)
+- Game title (3xl font, bold)
+- Platform icon and name
+- Genre badge
+- Action buttons (Play Now, Settings)
+
+### Stats cards
+
+Three stat cards displayed in a grid:
+
+1. **Play time** - Formatted as hours/minutes or "Never played"
+2. **Last played** - Relative time ("Today", "Yesterday", "3 days ago")
+3. **ROM path** - Filename with full path on hover
+
+### About section
+
+Placeholder card for future metadata integration.
+
+## Examples
+
+### Basic details
+
+```tsx
+<GameDetails
+  game={game}
+  onPlay={handlePlay}
+/>
+```
+
+### With settings handler
+
+```tsx
+const handleSettings = (game: Game) => {
+  // Open emulator settings dialog
+  openCoreSettings(game.systemId)
+}
+
+<GameDetails
+  game={game}
+  onPlay={handlePlay}
+  onSettings={handleSettings}
+/>
+```
+
+### Custom styling
+
+```tsx
+<GameDetails
+  game={game}
+  onPlay={handlePlay}
+  className="max-w-4xl mx-auto"
+/>
+```
+
+## Time formatting
+
+### Play time
+
+- Never played: `"Never played"`
+- Less than 1 hour: `"45m"`
+- 1+ hours: `"2h 30m"`
+
+### Last played
+
+- Today: `"Today"`
+- Yesterday: `"Yesterday"`
+- Less than 7 days: `"3 days ago"`
+- Less than 30 days: `"2 weeks ago"`
+- 30+ days: Full date (locale-formatted)
+
+## Component structure
+
+```tsx packages/ui/components/GameDetails.tsx
+export const GameDetails: React.FC<GameDetailsProps> = ({
+  game,
+  onPlay,
+  onSettings,
+  className
+}) => {
+  // Format helpers for time display
+  const formatPlayTime = (seconds?: number) => { /* ... */ }
+  const formatLastPlayed = (date?: Date) => { /* ... */ }
+
+  return (
+    <div className={cn("space-y-6", className)}>
+      {/* Header with cover art and basic info */}
+      {/* Stats cards */}
+      {/* Additional info */}
+    </div>
+  )
+}
+```
+
+## Icons used
+
+- `Play` - Play Now button
+- `Settings` - Settings button
+- `Clock` - Play time stat
+- `Calendar` - Last played stat
+- `HardDrive` - ROM path stat
+- `Info` - Placeholder when no cover art
+
+<Note>
+  All icons are from the `lucide-react` package.
+</Note>
+
+## Future enhancements
+
+The "About this game" section is a placeholder for:
+
+- Game description from metadata services
+- Release date
+- Developer/publisher
+- Screenshots
+- Achievement progress

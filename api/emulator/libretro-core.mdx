@@ -1,0 +1,274 @@
+---
+title: LibretroNativeCore
+description: Native libretro core wrapper with path validation and autosave management
+---
+
+The `LibretroNativeCore` class is the main entry point for native libretro emulation in GameLord. It handles path validation, directory setup, and autosave management before delegating actual emulation to a worker process.
+
+<Note>
+This class does not load the native addon or drive the emulation loop directly. Those responsibilities belong to the worker process managed by `EmulationWorkerClient`.
+</Note>
+
+## Architecture
+
+In the current architecture, the actual emulation loop runs in a dedicated utility process. `LibretroNativeCore` is responsible for:
+
+1. **Path validation** — Ensuring ROM and core paths are safe before handing them to the worker process
+2. **Config storage** — Exposing validated paths so `EmulationWorkerClient` can initialize the worker
+3. **Autosave management** — Filesystem checks for resume-game prompts that happen before the worker is spawned
+
+## Constructor
+
+```typescript
+new LibretroNativeCore(coresBasePath: string)
+```
+
+<ParamField path="coresBasePath" type="string" required>
+  Base path for storing libretro cores
+</ParamField>
+
+Initializes the core instance and creates required directories:
+
+- `userData/savestates` — Save states
+- `userData/saves` — SRAM/battery saves
+- `userData/BIOS` — System BIOS files
+
+## Methods
+
+### launch
+
+Validate and prepare ROM/core paths for emulation.
+
+```typescript
+await launch(
+  romPath: string,
+  options: EmulatorLaunchOptions
+): Promise<void>
+```
+
+<ParamField path="romPath" type="string" required>
+  Absolute path to the ROM file
+</ParamField>
+
+<ParamField path="options.corePath" type="string" required>
+  Absolute path to the libretro core (.dylib, .dll, or .so)
+</ParamField>
+
+<Warning>
+Throws an error if the emulator is already running or if the core path is not provided.
+</Warning>
+
+#### Core path security
+
+Cores must be loaded from one of these allowed directories:
+
+- **App-managed**: `userData/cores`
+- **RetroArch** (macOS): `~/Library/Application Support/RetroArch/cores`
+- **RetroArch** (Windows): `%APPDATA%/RetroArch/cores`
+- **RetroArch** (Linux): `~/.config/retroarch/cores`
+
+#### Example
+
+```typescript
+const core = new LibretroNativeCore(coresBasePath)
+
+await core.launch('/path/to/game.sfc', {
+  corePath: '/path/to/snes9x_libretro.dylib'
+})
+
+console.log('Core launched:', core.getCorePath())
+```
+
+### Path getters
+
+These methods expose validated paths for the worker process.
+
+#### getCorePath
+
+```typescript
+getCorePath(): string
+```
+
+Returns the validated core path. Throws if `launch()` has not been called.
+
+#### getRomPath
+
+```typescript
+getRomPath(): string
+```
+
+Returns the validated ROM path. Throws if `launch()` has not been called.
+
+#### getSystemDir
+
+```typescript
+getSystemDir(): string
+```
+
+Returns the BIOS directory path. Throws if `launch()` has not been called.
+
+#### getSaveDir
+
+```typescript
+getSaveDir(): string
+```
+
+Returns the directory for game saves.
+
+#### getSramDir
+
+```typescript
+getSramDir(): string
+```
+
+Returns the directory for SRAM/battery saves.
+
+#### getSaveStatesDir
+
+```typescript
+getSaveStatesDir(): string
+```
+
+Returns the directory for save states.
+
+### Autosave management
+
+These methods check and manage autosave files before the worker starts.
+
+#### hasAutoSave
+
+```typescript
+hasAutoSave(): boolean
+```
+
+Returns `true` if an autosave exists for the currently loaded ROM.
+
+#### hasAutoSaveForRom
+
+```typescript
+hasAutoSaveForRom(romPath: string): boolean
+```
+
+<ParamField path="romPath" type="string" required>
+  Path to the ROM file to check
+</ParamField>
+
+Returns `true` if an autosave exists for the specified ROM.
+
+#### deleteAutoSave
+
+```typescript
+deleteAutoSave(): void
+```
+
+Deletes the autosave for the currently loaded ROM.
+
+#### deleteAutoSaveForRom
+
+```typescript
+deleteAutoSaveForRom(romPath: string): void
+```
+
+<ParamField path="romPath" type="string" required>
+  Path to the ROM whose autosave should be deleted
+</ParamField>
+
+Deletes the autosave for the specified ROM.
+
+#### Example usage
+
+```typescript
+// Check for autosave before launching
+if (core.hasAutoSaveForRom(romPath)) {
+  const resume = await showResumeDialog()
+  if (!resume) {
+    core.deleteAutoSaveForRom(romPath)
+  }
+}
+
+await core.launch(romPath, { corePath })
+```
+
+### Lifecycle methods
+
+These methods emit events but defer actual emulation control to the worker.
+
+#### pause
+
+```typescript
+await pause(): Promise<void>
+```
+
+Emits a `paused` event. Actual pause control happens in the worker.
+
+#### resume
+
+```typescript
+await resume(): Promise<void>
+```
+
+Emits a `resumed` event. Actual resume control happens in the worker.
+
+#### reset
+
+```typescript
+await reset(): Promise<void>
+```
+
+Emits a `reset` event. Actual reset control happens in the worker.
+
+#### terminate
+
+```typescript
+await terminate(): Promise<void>
+```
+
+Cleans up local state and emits a `terminated` event.
+
+#### isActive
+
+```typescript
+isActive(): boolean
+```
+
+Returns `true` if the core is currently running.
+
+## Events
+
+Inherits from `EventEmitter` and emits the following events:
+
+- `launched` — `{ romPath: string, corePath: string }` — Fired after successful path validation
+- `paused` — Fired when pause is requested
+- `resumed` — Fired when resume is requested
+- `reset` — Fired when reset is requested
+- `terminated` — Fired when the core is terminated
+
+## Worker integration
+
+This class is designed to work with `EmulationWorkerClient`, which handles the actual emulation loop:
+
+```typescript
+const core = new LibretroNativeCore(coresBasePath)
+const worker = new EmulationWorkerClient()
+
+// Validate and prepare paths
+await core.launch(romPath, { corePath })
+
+// Initialize worker with validated paths
+const avInfo = await worker.init({
+  corePath: core.getCorePath(),
+  romPath: core.getRomPath(),
+  systemDir: core.getSystemDir(),
+  saveDir: core.getSaveDir(),
+  sramDir: core.getSramDir(),
+  saveStatesDir: core.getSaveStatesDir(),
+  addonPath: nativeAddonPath
+})
+
+console.log('Emulation ready:', avInfo)
+```
+
+## Related
+
+- [EmulationWorkerClient](/api/emulator/worker-client) — Worker process client for running emulation
+- [CoreDownloader](/api/emulator/core-downloader) — Download and manage libretro cores
